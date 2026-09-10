@@ -5,6 +5,7 @@
   "public_claim": "complete_public_application_with_private_blackbox_boundary",
   "allowed_files": [
     ".github/workflows/public-gate.yml",
+    ".gitattributes",
     ".gitignore",
     "ARCHITECTURE.md",
     "LICENSE",
@@ -45,6 +46,7 @@
   ],
   "sha256": {
     ".github/workflows/public-gate.yml": "3ad3a3d225c5dabd97765c67a2d4dd564f6b8f9a191ff6224e1a1d0951f73921",
+    ".gitattributes": "a79691a93b46e49ce460c26ef22afcc03d6eca1e63bf2edbc20e96159510f6c9",
     ".gitignore": "13ac9d83f75a85da171b93e4d0f6747895307cd6094a16d4b05de0db75b730b1",
     "ARCHITECTURE.md": "3b029d1372df80b65ef81d6be4f89488092f8c97863f69c8a34a9c3b0ca128f5",
     "LICENSE": "57c8d6c71d436d740e19ebfeb61be437816496c2e6b36b608293e80c6b89c6ed",
