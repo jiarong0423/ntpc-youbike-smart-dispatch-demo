@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import hashlib
 from datetime import datetime, timedelta, timezone
 import json
 from pathlib import Path
@@ -16,6 +17,9 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "public_shell"))
 
 from serve_public_blackbox_gateway import (
+    canonical_json,
+    validate_blackbox_response,
+    validate_future_timestamp,
     validate_recent_timestamp,
     validate_sealed_result,
 )
@@ -233,14 +237,60 @@ class PublicGatewayTests(unittest.TestCase):
             "private_algorithm_attached"
         )
         live["proof_boundary"]["signature_policy"] = (
-            "signed_response_required"
+            "integrity_hash_only"
         )
-        live["edge_status"]["gateway_mode"] = "blackbox_api"
         with self.assertRaisesRegex(
             ValueError,
             "live_result_generated_at_stale",
         ):
             validate_sealed_result(live)
+
+    def valid_wrapped_response(self, now: datetime) -> dict:
+        result = deepcopy(
+            json.loads(
+                (ROOT / "fixtures" / "sealed.json").read_text(encoding="utf-8")
+            )
+        )
+        return {
+            "schema_version": "youbike.blackbox_response.v1",
+            "request_id": "req-123456789abc",
+            "generated_at": now.isoformat(),
+            "source_snapshot_at": now.isoformat(),
+            "credential_expires_at": (now + timedelta(hours=2)).isoformat(),
+            "result_sha256": hashlib.sha256(canonical_json(result)).hexdigest(),
+            "result": result,
+        }
+
+    def test_blackbox_response_is_full_schema_fail_closed(self) -> None:
+        now = datetime(2026, 9, 10, 12, 0, tzinfo=timezone.utc)
+        valid = self.valid_wrapped_response(now)
+        self.assertEqual(
+            valid["result"],
+            validate_blackbox_response(valid, valid["request_id"], now=now),
+        )
+        missing = deepcopy(valid)
+        del missing["credential_expires_at"]
+        with self.assertRaisesRegex(
+            ValueError, "blackbox_response_json_schema_invalid"
+        ):
+            validate_blackbox_response(missing, valid["request_id"], now=now)
+        extra = deepcopy(valid)
+        extra["private_score"] = 1
+        with self.assertRaisesRegex(
+            ValueError, "blackbox_response_json_schema_invalid"
+        ):
+            validate_blackbox_response(extra, valid["request_id"], now=now)
+
+    def test_expired_credential_timestamp_is_rejected(self) -> None:
+        now = datetime(2026, 9, 10, 12, 0, tzinfo=timezone.utc)
+        with self.assertRaisesRegex(
+            ValueError, "credential_expires_at_expired"
+        ):
+            validate_future_timestamp(
+                (now - timedelta(seconds=1)).isoformat(),
+                "credential_expires_at",
+                now=now,
+            )
 
 
 if __name__ == "__main__":

@@ -8,8 +8,8 @@ Scope: PUBLIC_EXPORT_MANIFEST.json allowlisted files
 
 - Python and JavaScript syntax checks: PASS
 - Playwright responsive visual smoke: PASS on 1440x900 and 390x844
-- Unit and integration tests: 22 passed
-- LocalGuard development safety gate: 0 findings after remediation
+- Unit and integration tests: 25 passed
+- LocalGuard development safety gate: 2 reviewed medium findings, 0 blocking
 - AI Security export gate: PASS, 0 blocking
 - Release boundary safety gate: 0 findings, 0 blocking
 - Explicit personal data and private algorithm scan: 0 findings
@@ -23,11 +23,13 @@ Scope: PUBLIC_EXPORT_MANIFEST.json allowlisted files
 - Enforced an exact public static-file allowlist.
 - Allowed only the explicit `mode=offline` query on the public index; unknown index queries remain blocked.
 - Enforced LIVE result, response, and source timestamp freshness with stale, future, and missing-value rejection tests.
+- Enforced the complete black-box request and response JSON Schemas, including unknown-field rejection and short-lived credential expiry.
+- Enforced equality between the repository package, manifest allowlist and SHA-256 key set.
 - Removed exact percentage labels from the public historical SVG while retaining intervalized trend direction.
 
 ## Reviewed Tool Finding
 
-The AI Security portfolio scanner reports the GitHub Actions dependency installation step twice as high-risk executable configuration. This is an expected CI package-runner step using the two pinned direct dependencies in requirements.txt. The dedicated export gate evaluated the same candidate as PASS with zero blocking items.
+The AI Security portfolio scanner reports the GitHub Actions dependency installation step twice as high-risk executable configuration. This is an expected CI package-runner step using the two pinned direct dependencies in requirements.txt. The dedicated export gate evaluated the same candidate as PASS with zero blocking items.\n\nLocalGuard reports the documented public API route map and a possible browser-cache risk. The route map is intentionally public; private credentials remain server-side and the private API is loopback-only. No service worker or Cache Storage implementation exists, and every API response sends Cache-Control: no-store. Both findings are reviewed documentation-pattern matches rather than unmitigated runtime exposures.
 
 ## Residual Risk
 

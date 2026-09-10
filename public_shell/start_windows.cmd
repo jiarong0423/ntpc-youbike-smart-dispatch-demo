@@ -30,10 +30,10 @@ if /I not "%MODE%"=="live" (
 )
 if "%YOUBIKE_BLACKBOX_CREDENTIAL_FILE%"=="" set "YOUBIKE_BLACKBOX_CREDENTIAL_FILE=%CREDENTIAL_FILE%"
 if not exist "%YOUBIKE_BLACKBOX_CREDENTIAL_FILE%" (
-  echo Run ..\INSTALL_AND_RUN_WINDOWS.cmd first to issue the local credential.
+  echo Live mode requires the separate private venue package to issue a short-lived credential.
   exit /b 2
 )
-set "YOUBIKE_BLACKBOX_REGISTRY_DIR=%REGISTRY_DIR%"
-set "YOUBIKE_BLACKBOX_URL=http://127.0.0.1:8781/api/v1/dispatch/evaluate"
+if "%YOUBIKE_BLACKBOX_REGISTRY_DIR%"=="" set "YOUBIKE_BLACKBOX_REGISTRY_DIR=%REGISTRY_DIR%"
+if "%YOUBIKE_BLACKBOX_URL%"=="" set "YOUBIKE_BLACKBOX_URL=http://127.0.0.1:8781/api/v1/dispatch/evaluate"
 "%VENV_DIR%\Scripts\python.exe" public_shell\serve_public_blackbox_gateway.py --bind 0.0.0.0 --port 8084 --directory . --task-db "%TASK_DB%" --public-base-url "http://%PUBLIC_HOST%:8084"
 exit /b %errorlevel%

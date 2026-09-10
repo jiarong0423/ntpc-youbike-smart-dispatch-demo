@@ -329,11 +329,6 @@
         "label": "貨車派工 · 板橋區",
         "eta_band": "under_20m"
       },
-      "edge_hint": {
-        "present": false,
-        "device_class": "none",
-        "status_label": "BLE 已凍結，不在本次 MVP 主線"
-      },
       "explanation_text": "展示 貨車派工、QR 認領與交接流程；數值經區間化及時間錯位處理。"
     },
     {
@@ -348,31 +343,21 @@
         "label": "貨車派工 · 新莊區",
         "eta_band": "under_20m"
       },
-      "edge_hint": {
-        "present": false,
-        "device_class": "none",
-        "status_label": "BLE 已凍結，不在本次 MVP 主線"
-      },
       "explanation_text": "展示 貨車派工、QR 認領與交接流程；數值經區間化及時間錯位處理。"
     },
     {
       "case_id": "case-sanchong-venue-dispatch",
       "district_id": "ntpc-sanchong",
-      "display_name": "三重通勤補車",
+      "display_name": "三重通勤現場確認",
       "priority_band": "critical",
-      "action_label": "add_bikes",
+      "action_label": "rebalance_window",
       "confidence_band": "high",
       "route_handoff": {
         "present": true,
-        "label": "機車派工 · 三重區",
+        "label": "機車先遣 · 三重區",
         "eta_band": "under_10m"
       },
-      "edge_hint": {
-        "present": false,
-        "device_class": "none",
-        "status_label": "BLE 已凍結，不在本次 MVP 主線"
-      },
-      "explanation_text": "展示 機車派工、QR 認領與交接流程；數值經區間化及時間錯位處理。"
+      "explanation_text": "先確認滯留或待回補車輛、站點空間與交接條件；需要搬運時再升級貨車。"
     },
     {
       "case_id": "case-tamsui-venue-dispatch",
@@ -386,57 +371,37 @@
         "label": "貨車派工 · 淡水區",
         "eta_band": "over_20m"
       },
-      "edge_hint": {
-        "present": false,
-        "device_class": "none",
-        "status_label": "BLE 已凍結，不在本次 MVP 主線"
-      },
       "explanation_text": "展示 貨車派工、QR 認領與交接流程；數值經區間化及時間錯位處理。"
     },
     {
       "case_id": "case-xindian-venue-dispatch",
       "district_id": "ntpc-xindian",
-      "display_name": "新店河岸調度",
+      "display_name": "新店河岸現場確認",
       "priority_band": "high",
       "action_label": "rebalance_window",
       "confidence_band": "high",
       "route_handoff": {
         "present": true,
-        "label": "機車派工 · 新店區",
+        "label": "機車先遣 · 新店區",
         "eta_band": "under_20m"
       },
-      "edge_hint": {
-        "present": false,
-        "device_class": "none",
-        "status_label": "BLE 已凍結，不在本次 MVP 主線"
-      },
-      "explanation_text": "展示 機車派工、QR 認領與交接流程；數值經區間化及時間錯位處理。"
+      "explanation_text": "河岸生活圈先由機車確認同側站點狀態，再決定是否進入離峰貨車發配。"
     },
     {
       "case_id": "case-ruifang-venue-dispatch",
       "district_id": "ntpc-ruifang",
-      "display_name": "瑞芳回補調度",
+      "display_name": "瑞芳觀光週期確認",
       "priority_band": "medium",
-      "action_label": "pull_bikes",
+      "action_label": "observe",
       "confidence_band": "medium",
       "route_handoff": {
         "present": true,
-        "label": "機車派工 · 瑞芳區",
+        "label": "機車先遣 · 瑞芳區",
         "eta_band": "over_20m"
       },
-      "edge_hint": {
-        "present": false,
-        "device_class": "none",
-        "status_label": "BLE 已凍結，不在本次 MVP 主線"
-      },
-      "explanation_text": "展示 機車派工、QR 認領與交接流程；數值經區間化及時間錯位處理。"
+      "explanation_text": "觀光週期先確認回流方向與滯留車輛，再決定預備車或離峰搬運。"
     }
   ],
-  "edge_status": {
-    "hardware_path": "not_attached",
-    "gateway_mode": "fixture_only",
-    "last_smoke_label": "29-district data and QR workflow fixture; BLE frozen"
-  },
   "comparison_keys": [
     "schema_version",
     "runtime_mode",

@@ -13,7 +13,20 @@
 - 公開備查頁分開呈現 2026 年 1 至 9 月期間角色、近期批次與天氣特徵
 - Bedrock 只解釋經敏感欄位遮蔽的行政區摘要，不參與派工判斷
 
-完整邊界見 [ARCHITECTURE.md](ARCHITECTURE.md) 與 [SECURITY.md](SECURITY.md)。
+完整邊界見 [ARCHITECTURE.md](ARCHITECTURE.md)、[PAGE_AND_WORKSPACE_INDEX.md](PAGE_AND_WORKSPACE_INDEX.md) 與 [SECURITY.md](SECURITY.md)。
+
+## 派工與證據層
+
+- 機車是快速先遣：先確認站點現況、滯留或待回補車輛、可操作空間與交接條件，不負責載運自行車。
+- 貨車是實際調度：確認需要補車或拔車後，才在合適時段搬運多輛自行車。
+- 兩種任務共用同一張 QR 派工單與狀態紀錄，保留認領、到站、完成與異常證據。
+- 歷史快照建立區域基準，近期流入快照提取偏移，再產生動態區域調度。
+- 既有證據包含天氣、長假、觀光區及學區寒暑假週期的周轉變化，支援預備車、先遣確認與離峰順向發配。
+- 都市更新與新站快速增加會改變生活圈，因此新站先通過站點母體更新閥門，再重算區域平衡。
+- 河川、橋梁與幹道會割裂直線距離上的鄰近站點，派工優先在同側生活圈內平衡。
+- 景安站案例比較電輔車配置與離峰調度，作為長期轉乘壓力的兩條可執行策略。
+
+上述內容來自已留存的歷史曲線、近期快照、天氣分組、地形路網與情境模擬證據。公開端只呈現趨勢、狀態級別與行動方向，不公開精確權重。
 
 ## 資料口徑
 
@@ -28,11 +41,17 @@
 
 ## Windows 比賽執行
 
-會場包支援 64 位元 Python 3.11、3.12 或 3.13。根目錄 `INSTALL_AND_RUN_WINDOWS.cmd` 會使用離線 wheelhouse，並在 <code>%LOCALAPPDATA%\NTPCYouBikeVenue</code> 建立 venv、SQLite、短效憑證、registry 與日誌，不會把執行資料寫進 repo。
+公開 GitHub 可在乾淨 Windows 上先跑離線模式。根目錄 `INSTALL_AND_RUN_WINDOWS.cmd` 會在 <code>%LOCALAPPDATA%\NTPCYouBikeVenue</code> 建立 venv 與 SQLite，不會把執行資料寫進 repo。有 `wheelhouse` 時採離線安裝，沒有時從 `requirements.txt` 安裝。
 
-黑箱近即時連線模式：
+公開版離線啟動：
 
-    ..\INSTALL_AND_RUN_WINDOWS.cmd 192.168.1.10
+    INSTALL_AND_RUN_WINDOWS.cmd offline 127.0.0.1
+
+會場私有包另含短效憑證與本機黑箱；公開 GitHub 不會建立或攜帶這些內容。
+
+會場包黑箱近即時連線模式：
+
+    INSTALL_AND_RUN_WINDOWS.cmd live 192.168.1.10
 
 明確離線展示：
 

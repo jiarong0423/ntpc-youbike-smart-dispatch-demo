@@ -14,7 +14,6 @@
     "summary",
     "districts",
     "selected_cases",
-    "edge_status",
     "comparison_keys"
   ],
   "properties": {
@@ -102,7 +101,6 @@
           "type": "string",
           "enum": [
             "fixture_unsigned",
-            "signed_response_required",
             "integrity_hash_only"
           ]
         }
@@ -244,7 +242,6 @@
           "action_label",
           "confidence_band",
           "route_handoff",
-          "edge_hint",
           "explanation_text"
         ],
         "properties": {
@@ -315,65 +312,11 @@
               }
             }
           },
-          "edge_hint": {
-            "type": "object",
-            "additionalProperties": false,
-            "required": [
-              "present",
-              "device_class",
-              "status_label"
-            ],
-            "properties": {
-              "present": {
-                "type": "boolean"
-              },
-              "device_class": {
-                "type": "string",
-                "enum": [
-                  "none"
-                ]
-              },
-              "status_label": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 80
-              }
-            }
-          },
           "explanation_text": {
             "type": "string",
             "minLength": 1,
             "maxLength": 240
           }
-        }
-      }
-    },
-    "edge_status": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "hardware_path",
-        "gateway_mode",
-        "last_smoke_label"
-      ],
-      "properties": {
-        "hardware_path": {
-          "type": "string",
-          "enum": [
-            "not_attached"
-          ]
-        },
-        "gateway_mode": {
-          "type": "string",
-          "enum": [
-            "fixture_only",
-            "blackbox_api"
-          ]
-        },
-        "last_smoke_label": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 120
         }
       }
     },

@@ -3,12 +3,12 @@
 <style>
 text{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans TC",sans-serif;fill:#0f172a;letter-spacing:0}.title{font-size:32px;font-weight:900}.sub{font-size:16px;fill:#475569}.tiny{font-size:12px;fill:#64748b}.body{font-size:14px;fill:#334155}.strong{font-weight:850}.card{fill:#fff;stroke:#dbe5ef;stroke-width:1.3;rx:10}.box{fill:#fff;stroke:#cbd5e1;rx:9}.soft{fill:#f1f5f9;stroke:#cbd5e1;rx:8}.chartTitle{font-size:20px;font-weight:850}.axisText{font-size:12px;fill:#64748b}.grid{stroke:#e5e7eb;stroke-width:1}.axis{stroke:#cbd5e1;stroke-width:1.2}.line{fill:none;stroke-width:3.4;stroke-linejoin:round;stroke-linecap:round}.dot{fill:#fff;stroke-width:2}.legend{font-size:13px;font-weight:750}
 </style>
-<text x="54" y="56" class="title">2026 年 1-8 月區域特徵覆蓋</text>
+<text x="54" y="56" class="title">2026 年 1-9 月證據覆蓋</text>
 <text x="54" y="88" class="sub">公開備查固定版本：跨月快照先做區間化與時間錯位，只保留區域分組趨勢。</text>
 <text x="54" y="115" class="tiny">來源：1-6 月官方快照；7-9 月正式本地續接｜29 區彙整；不能還原單站或精確比例。</text>
 <rect x="54" y="135" width="1292" height="80" class="box"/>
 <text x="76" y="164" class="body strong">怎麼看</text>
-<text x="76" y="190" class="body">每張圖是一個後端特徵欄位，X 軸是 1-8 月，Y 軸是比例或波動指數；線往上/往下的意義寫在各圖內。</text>
+<text x="76" y="190" class="body">每張圖是一個後端特徵欄位；1-8 月以歷史曲線呈現，9 月以近期流入快照另行驗證。</text>
 <text x="760" y="164" class="body strong">線條代表</text>
 <line x1="760" y1="185" x2="788" y2="185" stroke="#111827" stroke-width="4" stroke-linecap="round"/>
 <text x="796" y="190" class="legend">全市平均</text>
@@ -227,5 +227,5 @@ text{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans TC",sans
 <circle cx="1176.4" cy="658.6" r="3.8" class="dot" stroke="#16a34a"/>
 <circle cx="1250.0" cy="659.8" r="3.8" class="dot" stroke="#16a34a"/>
 <rect x="54" y="918" width="1292" height="42" class="soft"/>
-<text x="76" y="944" class="body">評審白話：我們不是只看單次快照，而是把快照流壓成 1-8 月區域曲線，後端再轉成站點任務池；前端只顯示任務結果。</text>
+<text x="76" y="944" class="body">評審白話：歷史曲線建立基準，9 月近期快照提取偏移，後端再產生區域任務；前端只顯示任務結果。</text>
 </svg>

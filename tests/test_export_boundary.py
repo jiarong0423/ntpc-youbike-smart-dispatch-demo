@@ -33,6 +33,12 @@ FORBIDDEN_TEXT = {
     "BEGIN " + "PRIVATE KEY",
     "raw_" + "station_snapshot",
 }
+FORBIDDEN_PATTERNS = (
+    re.compile(
+        r"(?<![A-Za-z])" + "B" + "LE" + r"(?![A-Za-z])",
+        re.IGNORECASE,
+    ),
+)
 PRIVATE_ALGORITHM_PATTERNS = (
     re.compile(r"\b(?:weight|threshold|coefficient)\s*=", re.IGNORECASE),
     re.compile(r"\b(?:score|rank)_station\s*\(", re.IGNORECASE),
@@ -40,6 +46,12 @@ PRIVATE_ALGORITHM_PATTERNS = (
 
 
 class ExportBoundaryTests(unittest.TestCase):
+    @staticmethod
+    def manifest() -> dict:
+        return json.loads(
+            (ROOT / "PUBLIC_EXPORT_MANIFEST.json").read_text(encoding="utf-8")
+        )
+
     @staticmethod
     def public_files() -> list[Path]:
         manifest = json.loads(
@@ -58,10 +70,10 @@ class ExportBoundaryTests(unittest.TestCase):
         self.assertEqual([], missing)
 
     def test_manifest_hashes_match(self) -> None:
-        manifest = json.loads(
-            (ROOT / "PUBLIC_EXPORT_MANIFEST.json").read_text(
-                encoding="utf-8"
-            )
+        manifest = self.manifest()
+        self.assertEqual(
+            set(manifest["allowed_files"]),
+            set(manifest["sha256"]),
         )
         mismatches = [
             relative
@@ -71,6 +83,21 @@ class ExportBoundaryTests(unittest.TestCase):
             ).hexdigest() != expected
         ]
         self.assertEqual([], mismatches)
+
+    def test_manifest_covers_repository_package(self) -> None:
+        ignored_names = {".DS_Store", "PUBLIC_EXPORT_MANIFEST.json"}
+        actual = {
+            str(path.relative_to(ROOT))
+            for path in ROOT.rglob("*")
+            if (
+                path.is_file()
+                and ".git" not in path.parts
+                and "__pycache__" not in path.parts
+                and path.name not in ignored_names
+                and path.suffix.lower() != ".pyc"
+            )
+        }
+        self.assertEqual(actual, set(self.manifest()["allowed_files"]))
 
     def test_no_private_runtime_files(self) -> None:
         offenders = [
@@ -133,6 +160,11 @@ class ExportBoundaryTests(unittest.TestCase):
                 if value in text:
                     findings.append(
                         f"{path.relative_to(ROOT)}:{value}"
+                    )
+            for pattern in FORBIDDEN_PATTERNS:
+                if pattern.search(text):
+                    findings.append(
+                        f"{path.relative_to(ROOT)}:forbidden_token"
                     )
             for pattern in PRIVATE_ALGORITHM_PATTERNS:
                 if pattern.search(text):

@@ -19,6 +19,7 @@ from typing import Any
 from urllib import error, parse, request
 
 from jsonschema import Draft202012Validator, FormatChecker
+from referencing import Registry, Resource
 
 from task_ledger import TaskStore
 
@@ -27,8 +28,31 @@ DEFAULT_BLACKBOX_URL = "http://127.0.0.1:8781/api/v1/dispatch/evaluate"
 MAX_BODY_BYTES = 16 * 1024
 MAX_LIVE_RESULT_AGE_SECONDS = 30 * 60
 MAX_FUTURE_SKEW_SECONDS = 5 * 60
-SEALED_RESULT_SCHEMA = json.loads((PROJECT_ROOT / "contracts" / "sealed_result.schema.json").read_text(encoding="utf-8"))
-SEALED_RESULT_VALIDATOR = Draft202012Validator(SEALED_RESULT_SCHEMA, format_checker=FormatChecker())
+CONTRACT_DIR = PROJECT_ROOT / "contracts"
+SEALED_RESULT_SCHEMA = json.loads(
+    (CONTRACT_DIR / "sealed_result.schema.json").read_text(encoding="utf-8")
+)
+BLACKBOX_REQUEST_SCHEMA = json.loads(
+    (CONTRACT_DIR / "blackbox_request.schema.json").read_text(encoding="utf-8")
+)
+BLACKBOX_RESPONSE_SCHEMA = json.loads(
+    (CONTRACT_DIR / "blackbox_response.schema.json").read_text(encoding="utf-8")
+)
+FORMAT_CHECKER = FormatChecker()
+CONTRACT_REGISTRY = Registry().with_resource(
+    SEALED_RESULT_SCHEMA["$id"], Resource.from_contents(SEALED_RESULT_SCHEMA)
+)
+SEALED_RESULT_VALIDATOR = Draft202012Validator(
+    SEALED_RESULT_SCHEMA, format_checker=FORMAT_CHECKER
+)
+BLACKBOX_REQUEST_VALIDATOR = Draft202012Validator(
+    BLACKBOX_REQUEST_SCHEMA, format_checker=FORMAT_CHECKER
+)
+BLACKBOX_RESPONSE_VALIDATOR = Draft202012Validator(
+    BLACKBOX_RESPONSE_SCHEMA,
+    registry=CONTRACT_REGISTRY,
+    format_checker=FORMAT_CHECKER,
+)
 STATIC_PATHS = {
     "/public_shell/index.html",
     "/public_shell/app.js",
@@ -40,6 +64,7 @@ STATIC_PATHS = {
     "/public_shell/media/snapshot.svg",
     "/public_shell/media/weather-bike.svg",
     "/public_shell/media/weather-temperature.svg",
+    "/public_shell/media/operational-scenarios.svg",
     "/fixtures/sealed.json",
 }
 
@@ -83,7 +108,7 @@ def read_credential(path: Path) -> str:
 
 
 def build_request() -> dict[str, Any]:
-    return {
+    body = {
         "schema_version": "youbike.blackbox_request.v1",
         "request_id": f"req-{secrets.token_hex(12)}",
         "requested_at": datetime.now(
@@ -93,6 +118,13 @@ def build_request() -> dict[str, Any]:
         "view": "district_dispatch_summary",
         "limit": 20,
     }
+    errors = sorted(
+        BLACKBOX_REQUEST_VALIDATOR.iter_errors(body),
+        key=lambda item: list(item.path),
+    )
+    if errors:
+        raise ValueError("blackbox_request_json_schema_invalid")
+    return body
 
 
 def validate_recent_timestamp(
@@ -123,8 +155,31 @@ def validate_recent_timestamp(
     return parsed
 
 
+def validate_future_timestamp(
+    value: Any,
+    field_name: str,
+    *,
+    now: datetime | None = None,
+) -> datetime:
+    if not isinstance(value, str):
+        raise ValueError(f"{field_name}_missing")
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ValueError(f"{field_name}_invalid") from exc
+    if parsed.tzinfo is None:
+        raise ValueError(f"{field_name}_timezone_missing")
+    current = now or datetime.now(timezone.utc)
+    if parsed.astimezone(timezone.utc) <= current.astimezone(timezone.utc):
+        raise ValueError(f"{field_name}_expired")
+    return parsed
+
+
 def validate_sealed_result(result: Any) -> dict[str, Any]:
-    schema_errors = sorted(SEALED_RESULT_VALIDATOR.iter_errors(result), key=lambda item: list(item.path))
+    schema_errors = sorted(
+        SEALED_RESULT_VALIDATOR.iter_errors(result),
+        key=lambda item: list(item.path),
+    )
     if schema_errors:
         raise ValueError("sealed_result_json_schema_invalid")
     if not isinstance(result, dict):
@@ -139,7 +194,6 @@ def validate_sealed_result(result: Any) -> dict[str, Any]:
         "summary",
         "districts",
         "selected_cases",
-        "edge_status",
         "comparison_keys",
     }
     modes = {
@@ -174,6 +228,47 @@ def validate_sealed_result(result: Any) -> dict[str, Any]:
     return result
 
 
+def validate_blackbox_response(
+    wrapped: Any,
+    expected_request_id: str,
+    *,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    schema_errors = sorted(
+        BLACKBOX_RESPONSE_VALIDATOR.iter_errors(wrapped),
+        key=lambda item: list(item.path),
+    )
+    if schema_errors:
+        raise ValueError("blackbox_response_json_schema_invalid")
+    if not isinstance(wrapped, dict):
+        raise ValueError("blackbox_response_schema_invalid")
+    if wrapped.get("request_id") != expected_request_id:
+        raise ValueError("blackbox_response_request_id_mismatch")
+    validate_recent_timestamp(
+        wrapped["generated_at"], "blackbox_response_generated_at", now=now
+    )
+    validate_future_timestamp(
+        wrapped["credential_expires_at"], "credential_expires_at", now=now
+    )
+    result = validate_sealed_result(wrapped["result"])
+    source_snapshot_at = wrapped["source_snapshot_at"]
+    if result["runtime_mode"] == "LIVE_LOCAL_SANDBOX":
+        validate_recent_timestamp(source_snapshot_at, "source_snapshot_at", now=now)
+    else:
+        try:
+            parsed_source = datetime.fromisoformat(
+                source_snapshot_at.replace("Z", "+00:00")
+            )
+        except ValueError as exc:
+            raise ValueError("source_snapshot_at_invalid") from exc
+        if parsed_source.tzinfo is None:
+            raise ValueError("source_snapshot_at_timezone_missing")
+    expected_hash = hashlib.sha256(canonical_json(result)).hexdigest()
+    if wrapped["result_sha256"] != expected_hash:
+        raise ValueError("blackbox_result_hash_mismatch")
+    return result
+
+
 def fetch_blackbox_result(
     url: str,
     credential_file: Path,
@@ -202,41 +297,7 @@ def fetch_blackbox_result(
         wrapped = json.loads(
             response.read(1024 * 1024).decode("utf-8")
         )
-    if (
-        not isinstance(wrapped, dict)
-        or wrapped.get("schema_version")
-        != "youbike.blackbox_response.v1"
-        or wrapped.get("request_id") != body["request_id"]
-    ):
-        raise ValueError("blackbox_response_schema_invalid")
-    validate_recent_timestamp(
-        wrapped.get("generated_at"),
-        "blackbox_response_generated_at",
-    )
-    result = validate_sealed_result(wrapped.get("result"))
-    source_snapshot_at = wrapped.get("source_snapshot_at")
-    if result["runtime_mode"] == "LIVE_LOCAL_SANDBOX":
-        validate_recent_timestamp(
-            source_snapshot_at,
-            "source_snapshot_at",
-        )
-    else:
-        if not isinstance(source_snapshot_at, str):
-            raise ValueError("source_snapshot_at_missing")
-        try:
-            parsed_source = datetime.fromisoformat(
-                source_snapshot_at.replace("Z", "+00:00")
-            )
-        except ValueError as exc:
-            raise ValueError("source_snapshot_at_invalid") from exc
-        if parsed_source.tzinfo is None:
-            raise ValueError("source_snapshot_at_timezone_missing")
-    expected_hash = hashlib.sha256(
-        canonical_json(result)
-    ).hexdigest()
-    if wrapped.get("result_sha256") != expected_hash:
-        raise ValueError("blackbox_result_hash_mismatch")
-    return result
+    return validate_blackbox_response(wrapped, body["request_id"])
 
 
 def probe_blackbox_health(
