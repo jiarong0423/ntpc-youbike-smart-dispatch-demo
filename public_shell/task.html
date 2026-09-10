@@ -24,19 +24,15 @@
             <div><dt>交接</dt><dd id="task-route">-</dd></div>
             <div><dt>更新時間</dt><dd id="task-updated">-</dd></div>
           </dl>
-          <label for="actor-alias">操作員代號</label>
-          <input id="actor-alias" value="operator-01" maxlength="24" pattern="[A-Za-z0-9_-]+">
           <div class="actions" aria-label="task actions">
-            <button type="button" data-event="claim">認領</button>
-            <button type="button" data-event="arrive">到站</button>
-            <button type="button" data-event="complete">完成</button>
-            <button type="button" class="danger" data-event="exception">異常</button>
+            <button type="button" data-event="complete" disabled>完成任務</button>
           </div>
+          <p id="runtime-notice">目前為本機任務帳本；此結果不代表 AWS 已同步。</p>
           <p id="message" role="status"></p>
         </article>
         <aside class="qr-panel">
           <img id="task-qr" alt="此任務的交接 QR code">
-          <p>手機與展示電腦連到同一個區域網路後掃描。</p>
+          <p>短期 QR 有效 5 分鐘；過期請由任務池重新開啟。</p>
           <a id="task-link" href="#">直接開啟此任務</a>
         </aside>
       </section>

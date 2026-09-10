@@ -18,7 +18,7 @@ h1, p { margin: 0; }
 h1 { font-size: 30px; }
 .eyebrow { margin-right: auto; color: var(--muted); font-size: 12px; font-weight: 800; text-transform: uppercase; }
 #status-badge { padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: #fff; font-weight: 800; }
-#status-badge[data-status="completed"] { color: #147253; background: #eaf7f1; }
+#status-badge[data-status="COMPLETED"] { color: #147253; background: #eaf7f1; }
 #status-badge[data-status="exception"] { color: var(--danger); background: #fff0ed; }
 .task-layout { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 16px; margin-top: 18px; }
 .task-detail, .qr-panel { border: 1px solid var(--line); border-radius: 8px; background: var(--surface); padding: 18px; }
@@ -28,7 +28,7 @@ dt { color: var(--muted); font-weight: 700; }
 dd { margin: 0; font-weight: 750; overflow-wrap: anywhere; }
 label { display: block; margin-bottom: 7px; color: var(--muted); font-size: 13px; font-weight: 750; }
 input { width: 100%; min-height: 42px; border: 1px solid var(--line); border-radius: 6px; padding: 9px 10px; font: inherit; }
-.actions { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin-top: 14px; }
+.actions { display: grid; grid-template-columns: 1fr; gap: 8px; margin-top: 14px; }
 button { min-height: 42px; border: 0; border-radius: 6px; background: var(--accent); color: #fff; font: inherit; font-weight: 800; cursor: pointer; }
 button.danger { background: var(--danger); }
 button:disabled { cursor: not-allowed; opacity: 0.35; }
@@ -41,5 +41,5 @@ button:disabled { cursor: not-allowed; opacity: 0.35; }
   header { align-items: flex-start; flex-wrap: wrap; }
   .eyebrow { width: 100%; }
   .task-layout { grid-template-columns: 1fr; }
-  .actions { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .actions { grid-template-columns: 1fr; }
 }

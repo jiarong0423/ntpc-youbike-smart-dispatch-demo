@@ -11,7 +11,10 @@ import sys
 import tempfile
 import time
 import unittest
-from urllib import error, request
+from urllib import error, parse, request
+from contextlib import closing
+import sqlite3
+from jsonschema import Draft202012Validator, FormatChecker
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "public_shell"))
@@ -112,6 +115,47 @@ class PublicGatewayTests(unittest.TestCase):
             body = response.read()
         self.assertIn(b"<svg", body)
         self.assertNotIn(b"127.0.0.1:8781", body)
+
+    def test_signed_completion_contract_over_http(self) -> None:
+        task = self.get_json("/api/handoff/tasks")["tasks"][0]
+        path = "/api/handoff/tasks/" + task["task_id"]
+        detail = self.get_json(path)
+        grant_url = parse.urlparse(detail["completion_url"])
+        self.assertTrue(grant_url.fragment)
+        self.assertNotIn("signature", grant_url.query)
+        grant = dict(parse.parse_qsl(grant_url.fragment))
+        payload = {"task_id": task["task_id"], "task_type": task["task_type"],
+                   "event_id": "evt-http-completion-01", "device_hash": "a" * 64,
+                   "signature": grant["signature"], "occurred_at": datetime.now(timezone.utc).isoformat()}
+        event_schema = json.loads((ROOT / "contracts/task_event_request.schema.json").read_text())
+        task_schema = json.loads((ROOT / "contracts/task_response.schema.json").read_text())
+        Draft202012Validator(event_schema, format_checker=FormatChecker()).validate(payload)
+        for duplicate in (False, True):
+            req = request.Request(self.base + path + "/events", data=canonical_json(payload),
+                                  headers={"Content-Type": "application/json"})
+            with request.urlopen(req, timeout=2) as response:
+                completed = json.loads(response.read())
+            self.assertEqual(duplicate, completed["duplicate"])
+            self.assertEqual("COMPLETED", completed["task"]["status"])
+            Draft202012Validator(task_schema, format_checker=FormatChecker()).validate(completed["task"])
+        self.assertIsNone(self.get_json(path)["completion_url"])
+        with self.assertRaises(error.HTTPError) as blocked:
+            request.urlopen(self.base + path + "/qr.svg", timeout=2)
+        self.assertEqual(409, blocked.exception.code)
+
+    def test_unsigned_and_malformed_events_only_append_errors(self) -> None:
+        task = self.get_json("/api/handoff/tasks")["tasks"][0]
+        path = "/api/handoff/tasks/" + task["task_id"]
+        for body in (b'{"event_id":"evt-invalid-0001","event_type":"claim","actor_alias":"private-never-store"}', b'not-json'):
+            with self.assertRaises(error.HTTPError):
+                request.urlopen(request.Request(self.base + path + "/events", data=body,
+                                headers={"Content-Type": "application/json"}), timeout=2)
+        self.assertEqual("OPEN", self.get_json(path)["task"]["status"])
+        with closing(sqlite3.connect(Path(self.temp.name) / "task.sqlite3")) as conn:
+            self.assertEqual(0, conn.execute("SELECT COUNT(*) FROM task_event").fetchone()[0])
+            audits = conn.execute("SELECT * FROM task_attempt").fetchall()
+            self.assertEqual(2, len(audits))
+            self.assertNotIn("private-never-store", str(audits))
 
     def test_root_redirect_loads_relative_assets(self) -> None:
         with request.urlopen(

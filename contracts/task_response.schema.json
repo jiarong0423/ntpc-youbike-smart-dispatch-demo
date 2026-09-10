@@ -14,8 +14,8 @@
     "route_label",
     "eta_band",
     "status",
-    "actor_alias",
-    "updated_at"
+    "updated_at",
+    "task_type"
   ],
   "properties": {
     "task_id": {
@@ -26,29 +26,66 @@
       "type": "string",
       "pattern": "^case-[a-z0-9-]{4,60}$"
     },
-    "display_name": {"type": "string", "minLength": 1, "maxLength": 80},
-    "district_id": {"type": "string", "pattern": "^ntpc-[a-z0-9-]{2,40}$"},
+    "display_name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80
+    },
+    "district_id": {
+      "type": "string",
+      "pattern": "^ntpc-[a-z0-9-]{2,40}$"
+    },
     "action_label": {
       "type": "string",
-      "enum": ["add_bikes", "pull_bikes", "observe", "rebalance_window"]
+      "enum": [
+        "add_bikes",
+        "pull_bikes",
+        "observe",
+        "rebalance_window"
+      ]
     },
     "priority_band": {
       "type": "string",
-      "enum": ["low", "medium", "high", "critical"]
+      "enum": [
+        "low",
+        "medium",
+        "high",
+        "critical"
+      ]
     },
-    "route_label": {"type": "string", "minLength": 1, "maxLength": 80},
+    "route_label": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80
+    },
     "eta_band": {
       "type": "string",
-      "enum": ["none", "under_10m", "under_20m", "over_20m"]
+      "enum": [
+        "none",
+        "under_10m",
+        "under_20m",
+        "over_20m"
+      ]
     },
     "status": {
       "type": "string",
-      "enum": ["pending", "claimed", "arrived", "completed", "exception"]
+      "enum": [
+        "OPEN",
+        "COMPLETED"
+      ]
     },
-    "actor_alias": {
-      "type": ["string", "null"],
-      "pattern": "^[A-Za-z0-9_-]{1,24}$"
+    "updated_at": {
+      "type": "string",
+      "format": "date-time"
     },
-    "updated_at": {"type": "string", "format": "date-time"}
+    "task_type": {
+      "type": "string",
+      "enum": [
+        "add_bikes",
+        "pull_bikes",
+        "observe",
+        "rebalance_window"
+      ]
+    }
   }
 }

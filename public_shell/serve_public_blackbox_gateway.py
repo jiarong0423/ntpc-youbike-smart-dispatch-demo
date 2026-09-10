@@ -436,6 +436,15 @@ class GatewayHandler(SimpleHTTPRequestHandler):
             ),
         )
 
+    def end_headers(self) -> None:
+        self.send_header("Referrer-Policy", "no-referrer")
+        super().end_headers()
+
+    def completion_link(self, task_id: str) -> str:
+        grant = self.task_store.issue_signature(task_id)
+        return (self.server.public_base_url + "/public_shell/task.html?task_id="
+                + parse.quote(task_id) + "#" + parse.urlencode(grant))
+
     def do_GET(self) -> None:
         parsed_path = parse.urlparse(self.path)
         path = parsed_path.path
@@ -576,6 +585,7 @@ class GatewayHandler(SimpleHTTPRequestHandler):
                 {
                     "ok": True,
                     "task": task,
+                    "completion_url": self.completion_link(parts[3]) if task["status"] == "OPEN" else None,
                 },
             )
 
@@ -606,11 +616,9 @@ class GatewayHandler(SimpleHTTPRequestHandler):
                         "error": "qrcode_dependency_missing",
                     },
                 )
-            target = (
-                f"{self.server.public_base_url}"  # type: ignore[attr-defined]
-                "/public_shell/task.html"
-                f"?task_id={parse.quote(parts[3])}"
-            )
+            if task["status"] != "OPEN":
+                return self.send_json(HTTPStatus.CONFLICT, {"ok": False, "error": "task_not_open"})
+            target = self.completion_link(parts[3])
             image = qrcode.make(
                 target,
                 image_factory=qrcode.image.svg.SvgPathImage,
@@ -688,24 +696,14 @@ class GatewayHandler(SimpleHTTPRequestHandler):
                 )
             )
         except ValueError:
-            return self.send_json(
-                HTTPStatus.BAD_REQUEST,
-                {
-                    "ok": False,
-                    "error": "invalid_content_length",
-                },
-            )
+            status, body = self.task_store.reject(parts[3], None, "invalid_content_length")
+            return self.send_json(status, body)
         if (
             length <= 0
             or length > MAX_BODY_BYTES
         ):
-            return self.send_json(
-                HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
-                {
-                    "ok": False,
-                    "error": "body_size_invalid",
-                },
-            )
+            status, body = self.task_store.reject(parts[3], None, "body_size_invalid", 413)
+            return self.send_json(status, body)
         try:
             payload = json.loads(
                 self.rfile.read(length).decode("utf-8")
@@ -714,13 +712,8 @@ class GatewayHandler(SimpleHTTPRequestHandler):
             UnicodeDecodeError,
             json.JSONDecodeError,
         ):
-            return self.send_json(
-                HTTPStatus.BAD_REQUEST,
-                {
-                    "ok": False,
-                    "error": "invalid_json",
-                },
-            )
+            status, body = self.task_store.reject(parts[3], None, "invalid_json")
+            return self.send_json(status, body)
         status, response = self.task_store.apply_event(
             parts[3],
             payload,
@@ -805,12 +798,14 @@ def main() -> int:
         args.public_base_url
     )
     if (
-        parsed_base.scheme != "http"
+        parsed_base.scheme not in {"http", "https"}
         or not parsed_base.hostname
+        or parsed_base.username or parsed_base.password
+        or parsed_base.query or parsed_base.fragment
         or parsed_base.path not in {"", "/"}
     ):
         raise ValueError(
-            "public_base_url_must_be_http_origin"
+            "public_base_url_must_be_http_or_https_origin"
         )
     fixture = (
         args.offline_fixture.resolve(strict=True)

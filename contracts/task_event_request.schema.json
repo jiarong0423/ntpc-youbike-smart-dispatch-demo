@@ -4,19 +4,44 @@
   "title": "Public task event",
   "type": "object",
   "additionalProperties": false,
-  "required": ["event_id", "event_type", "actor_alias"],
+  "required": [
+    "task_id",
+    "task_type",
+    "event_id",
+    "device_hash",
+    "signature",
+    "occurred_at"
+  ],
   "properties": {
+    "task_id": {
+      "type": "string",
+      "pattern": "^task-[a-z0-9][a-z0-9-]{3,64}$"
+    },
+    "task_type": {
+      "type": "string",
+      "enum": [
+        "add_bikes",
+        "pull_bikes",
+        "observe",
+        "rebalance_window"
+      ]
+    },
     "event_id": {
       "type": "string",
       "pattern": "^evt-[A-Za-z0-9_-]{8,80}$"
     },
-    "event_type": {
+    "device_hash": {
       "type": "string",
-      "enum": ["claim", "arrive", "complete", "exception"]
+      "pattern": "^[a-f0-9]{64}$"
     },
-    "actor_alias": {
+    "signature": {
       "type": "string",
-      "pattern": "^[A-Za-z0-9_-]{1,24}$"
+      "maxLength": 1024,
+      "pattern": "^[A-Za-z0-9_-]+\\.[a-f0-9]{64}$"
+    },
+    "occurred_at": {
+      "type": "string",
+      "format": "date-time"
     }
   }
 }

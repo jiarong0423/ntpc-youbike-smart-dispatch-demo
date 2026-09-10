@@ -6,7 +6,7 @@
 | --- | --- | --- | --- | --- | --- |
 | Dispatch workspace | `/public_shell/index.html` | Browser UI plus same-origin BFF | Contract-valid black-box result or operator-selected offline fixture | Review 29 districts, priority bands and active tasks | Visible mode, source time, freshness state and case count |
 | Task pool jump | `Open task` in the dispatch workspace | `public_shell/app.js` | Selected `case_id` | Convert the case to a stable `task_id` and open its task URL | `/public_shell/task.html?task_id=...` |
-| Task handoff | `/public_shell/task.html?task_id=...` | Task page plus SQLite task ledger | One validated `task_id` | Claim, arrive, complete or report exception | Append-only task events, current state and duplicate-event protection |
+| Task handoff | `/public_shell/task.html?task_id=...` | Task page plus SQLite task ledger | One validated `task_id` | Complete task: OPEN to COMPLETED | Append-only task events, current state and duplicate-event protection |
 | QR handoff | `/api/handoff/tasks/{task_id}/qr.svg` | Same-origin BFF | Existing `task_id` and configured public base URL | Generate a QR code for the same task page | Phone opens the exact task URL; no official bicycle unlock function |
 | Evidence layer | `index.html` section `Data evidence` | Static public evidence assets | Fixed public summaries | Review historical coverage, recent batches, weather and operating cases | Versioned SVG summaries with explicit publication limits |
 | Live result boundary | `/api/blackbox/result` | Same-origin BFF | Authenticated response from `127.0.0.1:8781` | Validate schema, result time, source time, credential expiry and integrity hash | Near-real-time result only after every gate passes; otherwise fail-closed |
@@ -27,7 +27,7 @@
 ## Why Motorcycle And Truck Tasks Differ
 
 - A motorcycle task is a fast first-response assignment. The operator verifies station conditions, checks stranded or pending-replenishment bicycles, confirms whether the reported imbalance is actionable and completes the field handoff. It does not carry bicycles.
-- A truck task starts after the system has enough evidence to request physical redistribution. The crew adds or removes bicycles and records arrival, completion or exception through the same task page.
+- A truck task starts after the system has enough evidence to request physical redistribution. The crew adds or removes bicycles and records completion or rejected verification through the same task page.
 - During long holidays, longer borrow and return duration can reduce turnover. The system can prepare reserve bicycles, send a motorcycle for confirmation and schedule one-direction truck allocation in an off-peak window.
 - This split avoids sending a truck before the site is confirmed while preserving a direct path from data evidence to an auditable field task.
 
@@ -46,6 +46,6 @@
 2. Review the district priority and the recommended response class.
 3. Open a task from the task pool.
 4. Display or scan `/api/handoff/tasks/{task_id}/qr.svg`.
-5. On the task page, run claim, arrival and completion; use exception only for the exception branch.
+5. On the task page, press 完成任務; confirm COMPLETED, then verify a repeated event cannot update it again.
 6. Return to the dispatch workspace and show the evidence layer.
 7. Run the Bedrock adapter separately to demonstrate explanation without changing the decision.

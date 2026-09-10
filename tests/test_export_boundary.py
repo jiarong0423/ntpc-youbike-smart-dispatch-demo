@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from pathlib import Path
+from pathlib import Path, PurePath, PureWindowsPath
 import hashlib
 import json
 import re
@@ -45,6 +45,10 @@ PRIVATE_ALGORITHM_PATTERNS = (
 )
 
 
+def manifest_relative_path(path: PurePath, root: PurePath) -> str:
+    return path.relative_to(root).as_posix()
+
+
 class ExportBoundaryTests(unittest.TestCase):
     @staticmethod
     def manifest() -> dict:
@@ -63,7 +67,7 @@ class ExportBoundaryTests(unittest.TestCase):
 
     def test_manifest_files_exist(self) -> None:
         missing = [
-            str(path.relative_to(ROOT))
+            manifest_relative_path(path, ROOT)
             for path in self.public_files()
             if not path.is_file()
         ]
@@ -87,7 +91,7 @@ class ExportBoundaryTests(unittest.TestCase):
     def test_manifest_covers_repository_package(self) -> None:
         ignored_names = {".DS_Store", "PUBLIC_EXPORT_MANIFEST.json"}
         actual = {
-            str(path.relative_to(ROOT))
+            manifest_relative_path(path, ROOT)
             for path in ROOT.rglob("*")
             if (
                 path.is_file()
@@ -99,9 +103,22 @@ class ExportBoundaryTests(unittest.TestCase):
         }
         self.assertEqual(actual, set(self.manifest()["allowed_files"]))
 
+    def test_manifest_paths_are_posix_on_windows(self) -> None:
+        root = PureWindowsPath("D:/a/demo/demo")
+        for relative in (
+            "README.md",
+            "public_shell/task.js",
+            ".github/workflows/public-gate.yml",
+        ):
+            with self.subTest(relative=relative):
+                self.assertEqual(
+                    relative,
+                    manifest_relative_path(root / relative, root),
+                )
+
     def test_no_private_runtime_files(self) -> None:
         offenders = [
-            str(path.relative_to(ROOT))
+            manifest_relative_path(path, ROOT)
             for path in self.public_files()
             if (
                 path.is_file()

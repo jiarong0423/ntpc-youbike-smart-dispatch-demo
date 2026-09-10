@@ -4,61 +4,27 @@
 
 ```mermaid
 flowchart LR
-  classDef done fill:#e7f4ec,stroke:#18794e,color:#123524
-  classDef active fill:#fff4d6,stroke:#a45c00,color:#4c3000
-  classDef private fill:#fde8e7,stroke:#b42318,color:#4a1511
-  classDef later fill:#edf1f7,stroke:#65758b,color:#283444
-
-  subgraph SOURCE["Data evidence and private inputs"]
-    HISTORY["Historical station snapshots<br/>official Jan-Jun plus local continuation"]:::done
-    RECENT["Recent snapshot stream<br/>freshness and contract checks"]:::active
-    WEATHER["Weather and calendar features"]:::done
-    UNIVERSE["Station-universe updates<br/>new stations and living-circle changes"]:::done
+  subgraph LOCAL["Local Windows private boundary"]
+    INPUT["History, recent snapshots and weather"] --> ENGINE["Private black box<br/>127.0.0.1:8781"]
+    ENGINE -->|"Sanitized contract only"| BFF["Public BFF"]
+    BFF --> UI["29-district task workspace"]
+    BFF --> SQLITE["Explicit local SQLite mode<br/>OPEN to COMPLETED<br/>Locally tested; not cloud success"]
   end
-
-  subgraph PRIVATE["Owner-controlled Windows runtime"]
-    ENGINE["Private dispatch engine<br/>observation windows, features,<br/>divergence, weights and queue"]:::private
-    SAFE["Result sanitizer<br/>district, status band and action only"]:::done
-    API["Authenticated local black-box API<br/>127.0.0.1:8781"]:::active
-    HISTORY --> ENGINE
-    RECENT --> ENGINE
-    WEATHER --> ENGINE
-    UNIVERSE --> ENGINE
-    ENGINE --> SAFE --> API
+  subgraph CLOUD["AWS target architecture — deployment pending"]
+    API["API Gateway<br/>Fixed HTTPS task URL"] --> LAMBDA["Lambda<br/>Signature, task type, time and event validation"]
+    LAMBDA -->|"Atomic conditional transaction"| DDB["DynamoDB<br/>Authoritative cloud tasks and events"]
+    DDB -->|"After successful commit; retryable mirror"| SHEET["Google Sheets<br/>Observation and audit mirror"]
+    LAMBDA -->|"Sanitized summary only"| BEDROCK["Bedrock explanation<br/>Failure cannot change task state"]
   end
-
-  subgraph PUBLIC["Public GitHub application"]
-    CONTRACT["JSON schemas and boundary tests"]:::done
-    BFF["Same-origin BFF<br/>freshness and response validation"]:::done
-    DASH["Dispatch workspace<br/>29 districts and task pool"]:::done
-    LEDGER["SQLite task ledger<br/>idempotent status transitions"]:::done
-    TASK["Task handoff page<br/>claim, arrive, complete, exception"]:::done
-    QR["QR SVG and task URL"]:::done
-    EVIDENCE["Evidence layer<br/>history, recent snapshots, weather,<br/>station changes and operating cases"]:::done
-    OFFLINE["Explicit offline fixture<br/>fixed safe-transformed data"]:::done
-    CONTRACT --> BFF
-    BFF --> DASH
-    DASH -->|"Open task"| TASK
-    BFF --> LEDGER
-    LEDGER --> TASK
-    TASK --> QR
-    OFFLINE -. "operator selects offline" .-> BFF
-    DASH --- EVIDENCE
-  end
-
-  API -->|"authenticated sealed result"| BFF
-
-  subgraph AWS["Competition AWS explanation layer"]
-    BEDROCK["Amazon Bedrock<br/>operator wording only"]:::active
-  end
-  BFF -->|"sanitized district summary"| BEDROCK
-  BEDROCK -->|"bounded operator explanation"| DASH
-
-  WIN["Windows browser<br/>dispatch operator"]:::active
-  PHONE["Phone browser<br/>task handoff"]:::later
-  DASH --> WIN
-  QR --> PHONE
+  BFF -. "Authenticated task publication — pending" .-> API
+  UI -. "Short-lived signed HTTPS QR — pending" .-> PHONE["Phone on 4G or 5G"]
+  PHONE -. "Complete task" .-> API
+  API -. "Cloud task status — pending" .-> UI
+  LAMBDA --> REJECT["Invalid event: append rejection<br/>Do not change task"]
 ```
+
+Solid local SQLite paths describe the locally tested implementation. The AWS block is the intended deployment, not deployed infrastructure. Cloud operator authentication, DynamoDB transactions, Sheets mirroring and cellular QR verification remain pending. A local completion is always labelled as local; it cannot substitute for AWS confirmation.
+
 
 The public application exposes the complete operating workflow. The private engine supplies only contract-bound results and does not send formulas, weights, exact scores or source databases to the browser.
 
@@ -69,7 +35,7 @@ The public application exposes the complete operating workflow. The private engi
 | Motorcycle | Fast field verification, station condition check and task handoff | A location needs quick confirmation before committing a larger crew | Does not transport bicycles |
 | Truck | Physical redistribution of bicycles | The approved task requires adding or removing multiple bicycles | Requires a confirmed loading target and handoff task |
 
-The private engine recommends a response class. The public task workflow records assignment and completion; it does not expose the scoring formula.
+The private engine recommends a response class. The public task workflow records task completion; it does not expose the scoring formula.
 
 ## Evidence-To-Action Cases
 
@@ -91,9 +57,9 @@ The executable page, API and evidence ownership table is maintained in [PAGE_AND
 
 | Mode | Result source | Task and QR workflow | Claim |
 | --- | --- | --- | --- |
-| `LIVE_LOCAL_SANDBOX` | Owner-controlled Windows black-box API | Fully operational | Near-real-time only when source freshness and result contract both pass |
-| `SEALED_DEMO_FIXTURE` | Explicit safe-transformed fixed fixture | Fully operational | Offline demonstration only |
-| `PORTABLE_SEALED_FALLBACK` | Owner-provided sealed package | Fully operational | Fixed-time fallback, never realtime |
+| `LIVE_LOCAL_SANDBOX` | Owner-controlled Windows black-box API | Local workflow tested | Near-real-time only when source freshness and result contract both pass |
+| `SEALED_DEMO_FIXTURE` | Explicit safe-transformed fixed fixture | Local workflow tested | Offline demonstration only |
+| `PORTABLE_SEALED_FALLBACK` | Owner-provided sealed package | Local workflow tested | Fixed-time fallback, never realtime |
 | `AWS_EXPLANATION` | Sanitized district summary | Does not create or change dispatch decisions | Explanation layer only |
 
 ## Data Publication Semantics
