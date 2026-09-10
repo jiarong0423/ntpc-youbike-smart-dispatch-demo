@@ -1,6 +1,6 @@
 {
   "schema_version": "ntpc-youbike-public-export.v1",
-  "generated_at": "2026-09-11T07:05:14.977189+08:00",
+  "generated_at": "2026-09-10T23:14:06.487144+00:00",
   "repository": "jiarong0423/ntpc-youbike-smart-dispatch-demo",
   "public_claim": "complete_public_application_with_private_blackbox_boundary",
   "allowed_files": [
@@ -91,7 +91,7 @@
     "tests/test_contracts.py": "62779cf5c90a2d6d084121f9543a214e98310d7132952fc06033cf49be7342fe",
     "tests/test_export_boundary.py": "de6359239aa3900a4902a73bf5eafa79500601eafb51b607233738e93043161b",
     "tests/test_public_gateway.py": "9c84d705440a9f7c5b23fcf3e5a88e59473b645434ba5c909e291d46acd7ec11",
-    "tests/test_task_workflow.py": "8d199385693121ab8c3b16e98e9340c3e102041036d1d9198020336572200c2f"
+    "tests/test_task_workflow.py": "916fdda5de2f079ed3a73974a555e3783b910f85ffe52faac08dc69257f41e31"
   },
   "denied_classes": [
     "private_algorithm_source_or_binary",

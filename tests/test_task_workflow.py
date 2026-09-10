@@ -23,7 +23,7 @@ class TaskWorkflowTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.db_path = Path(self.temp.name) / "task.sqlite3"
         self.store = TaskStore(self.db_path, ROOT)
-        self.fixture = json.loads((ROOT / "fixtures" / "sealed.json").read_text())
+        self.fixture = json.loads((ROOT / "fixtures" / "sealed.json").read_text(encoding="utf-8"))
         self.assertEqual(6, self.store.seed_result(self.fixture))
         self.task_id = "task-banqiao-venue-dispatch"
 
