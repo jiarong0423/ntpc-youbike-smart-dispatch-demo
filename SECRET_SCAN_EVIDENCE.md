@@ -1,6 +1,6 @@
 # Secret And Privacy Scan Evidence
 
-Review date: 2026-09-10
+Review date: 2026-09-11
 Owner: repository owner
 Scope: PUBLIC_EXPORT_MANIFEST.json allowlisted files
 

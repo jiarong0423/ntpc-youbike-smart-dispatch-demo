@@ -22,8 +22,8 @@ class TaskWorkflowTests(unittest.TestCase):
                 encoding="utf-8"
             )
         )
-        self.assertEqual(3, self.store.seed_result(self.fixture))
-        self.task_id = "task-banqiao-transfer-core"
+        self.assertEqual(6, self.store.seed_result(self.fixture))
+        self.task_id = "task-banqiao-venue-dispatch"
 
     def tearDown(self) -> None:
         self.temp.cleanup()

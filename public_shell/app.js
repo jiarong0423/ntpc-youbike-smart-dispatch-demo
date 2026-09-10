@@ -4,168 +4,7 @@
   const liveResultPath = ["..", "api", "blackbox", "result"].join("/");
   const fixturePath = ["..", "fixtures", "sealed.json"].join("/");
   const offlineMode = new URLSearchParams(window.location.search).get("mode") === "offline";
-  const embeddedFixture = {
-    schema_version: "youbike.sealed_result.v1",
-    package_id: "sealed-youbike-shadow-demo-v1",
-    generated_at: "2026-09-01T16:10:00+08:00",
-    runtime_mode: "SEALED_DEMO_FIXTURE",
-    demo_scope: {
-      city: "新北市",
-      as_of_label: "sealed fixture for public shell validation",
-      data_class: "synthetic_fixture",
-      public_claim: "demo_only"
-    },
-    proof_boundary: {
-      algorithm_visibility: "black_box",
-      raw_data_visibility: "not_in_public_package",
-      frontend_calculation_policy: "display_only",
-      signature_policy: "fixture_unsigned"
-    },
-    summary: {
-      district_count: 4,
-      critical_count: 1,
-      warning_count: 2,
-      stable_count: 1,
-      active_case_count: 4,
-      mode_banner: "離線展示模式：synthetic fixture",
-      operator_message: "此畫面展示工作流與交付邊界；調度判斷由本機私有黑箱 產生，公開包不含演算法。"
-    },
-    districts: [
-      {
-        district_id: "ntpc-banqiao",
-        name: "板橋區",
-        priority_band: "critical",
-        action_label: "add_bikes",
-        confidence_band: "high",
-        case_count: 2,
-        display_rank: 1,
-        explanation_text: "核心轉乘區出現高優先級補車案例，建議優先接入本機私有黑箱 輸出的路線交接。"
-      },
-      {
-        district_id: "ntpc-xindian",
-        name: "新店區",
-        priority_band: "high",
-        action_label: "rebalance_window",
-        confidence_band: "medium",
-        case_count: 1,
-        display_rank: 2,
-        explanation_text: "展示殼保留區域級行動建議，不公開曲線、權重或站點級計分。"
-      },
-      {
-        district_id: "ntpc-sanchong",
-        name: "三重區",
-        priority_band: "medium",
-        action_label: "observe",
-        confidence_band: "medium",
-        case_count: 1,
-        display_rank: 3,
-        explanation_text: "目前以觀察狀態呈現，真實判斷需由本機私有黑箱 產生。"
-      },
-      {
-        district_id: "ntpc-shulin",
-        name: "樹林區",
-        priority_band: "low",
-        action_label: "observe",
-        confidence_band: "low",
-        case_count: 0,
-        display_rank: 4,
-        explanation_text: "此案例用於確認低頻與邊緣區域也能進入同一 sealed result 顯示契約。"
-      }
-    ],
-    selected_cases: [
-      {
-        case_id: "case-banqiao-transfer-core",
-        district_id: "ntpc-banqiao",
-        display_name: "板橋轉乘核心",
-        priority_band: "critical",
-        action_label: "add_bikes",
-        confidence_band: "high",
-        route_handoff: {
-          present: true,
-          label: "A 線接力",
-          eta_band: "under_20m"
-        },
-        edge_hint: {
-          present: false,
-          device_class: "none",
-          status_label: "實體裝置不在本競賽範圍"
-        },
-        explanation_text: "公開殼只顯示補車行動與交接狀態；完整推論在本機私有黑箱。"
-      },
-      {
-        case_id: "case-banqiao-event-overflow",
-        district_id: "ntpc-banqiao",
-        display_name: "板橋活動外溢",
-        priority_band: "high",
-        action_label: "rebalance_window",
-        confidence_band: "medium",
-        route_handoff: {
-          present: true,
-          label: "活動窗口接力",
-          eta_band: "under_20m"
-        },
-        edge_hint: {
-          present: false,
-          device_class: "none",
-          status_label: "實體裝置不在本競賽範圍"
-        },
-        explanation_text: "以區間化結果呈現調度窗口，不附帶可逆推的事件權重。"
-      },
-      {
-        case_id: "case-xindian-river-corridor",
-        district_id: "ntpc-xindian",
-        display_name: "新店河岸廊帶",
-        priority_band: "high",
-        action_label: "rebalance_window",
-        confidence_band: "medium",
-        route_handoff: {
-          present: true,
-          label: "河岸廊帶接力",
-          eta_band: "over_20m"
-        },
-        edge_hint: {
-          present: false,
-          device_class: "none",
-          status_label: "實體裝置不在本競賽範圍"
-        },
-        explanation_text: "此案例用於驗證弱聯網與邊緣節點也能回傳同一公開契約。"
-      },
-      {
-        case_id: "case-sanchong-watch",
-        district_id: "ntpc-sanchong",
-        display_name: "三重觀察點",
-        priority_band: "medium",
-        action_label: "observe",
-        confidence_band: "medium",
-        route_handoff: {
-          present: false,
-          label: "暫不交接",
-          eta_band: "none"
-        },
-        edge_hint: {
-          present: false,
-          device_class: "none",
-          status_label: "實體裝置不在本競賽範圍"
-        },
-        explanation_text: "保留觀察狀態，避免公開包暴露何時升級成正式調度的判斷式。"
-      }
-    ],
-    edge_status: {
-      hardware_path: "not_attached",
-      gateway_mode: "fixture_only",
-      last_smoke_label: "data and workflow validation only"
-    },
-    comparison_keys: [
-      "schema_version",
-      "runtime_mode",
-      "district_id",
-      "priority_band",
-      "action_label",
-      "confidence_band",
-      "route_handoff.present",
-      "mode_banner"
-    ]
-  };
+  const embeddedFixture = null;
 
   const labels = {
     priority: {
@@ -199,6 +38,8 @@
     operatorMessage: document.getElementById("operator-message"),
     scopeLabel: document.getElementById("scope-label"),
     caseLabel: document.getElementById("case-label"),
+    lineageMode: document.getElementById("lineage-mode"),
+    lineageFreshness: document.getElementById("lineage-freshness"),
     districtList: document.getElementById("district-list"),
     caseList: document.getElementById("case-list"),
     districtTemplate: document.getElementById("district-template"),
@@ -272,6 +113,16 @@
     setText(elements.operatorMessage, summary.operator_message);
     setText(elements.scopeLabel, `${scope.city || "-"} · ${scope.public_claim || "-"}`);
     setText(elements.caseLabel, `${payload.runtime_mode || "-"} · ${scope.data_class || "-"}`);
+    if (payload.runtime_mode === "LIVE_LOCAL_SANDBOX") {
+      setText(elements.lineageMode, "近即時黑箱結果");
+      setText(elements.lineageFreshness, `結果時間 ${payload.generated_at || "-"}；來源時間與 30 分鐘新鮮度已由 gateway 驗證。`);
+    } else if (payload.runtime_mode === "SEALED_DEMO_FIXTURE") {
+      setText(elements.lineageMode, "離線固定安全轉換資料");
+      setText(elements.lineageFreshness, `固定資料版本時間 ${payload.generated_at || "-"}；非目前資料、非原始資料、非即時計算。`);
+    } else {
+      setText(elements.lineageMode, "封裝備援結果");
+      setText(elements.lineageFreshness, `結果版本時間 ${payload.generated_at || "-"}；不宣稱為近即時資料。`);
+    }
   }
 
   function renderDistricts(payload) {
@@ -351,10 +202,10 @@
       .then(render)
       .catch((error) => {
         console.warn(error.message || "fixture load failed");
-        render(embeddedFixture);
-        setText(elements.modeBanner, "離線展示：內嵌 synthetic fixture");
-        setText(elements.operatorMessage, "操作員已明確啟用離線模式；此結果非即時運算，僅供 demo_only 展示。");
-        setText(elements.caseLabel, "SEALED_DEMO_FIXTURE · synthetic_fixture · operator-selected offline mode");
+        renderError("離線固定資料載入失敗；未使用內嵌舊資料替代。");
+        setText(elements.modeBanner, "離線資料不可用");
+        setText(elements.operatorMessage, "請檢查 fixtures/sealed.json 完整性後重試。");
+        setText(elements.caseLabel, "OFFLINE_FIXTURE_UNAVAILABLE · fail-closed");
       });
   } else {
     loadPayload(liveResultPath)
@@ -363,8 +214,10 @@
         console.warn(error.message || "blackbox load failed");
         renderError("黑箱服務目前無法使用；系統未自動切換為封存資料。請修復連線，或由操作員明確使用 ?mode=offline。");
         setText(elements.modeBanner, "黑箱服務中斷");
-        setText(elements.operatorMessage, "即時模式採 fail-closed；畫面不會以舊資料冒充即時計算結果。");
+        setText(elements.operatorMessage, "近即時連線採 fail-closed；畫面不會以舊資料冒充近期計算結果。");
         setText(elements.caseLabel, "BLACKBOX_UNAVAILABLE · no automatic fallback");
+        setText(elements.lineageMode, "黑箱不可用");
+        setText(elements.lineageFreshness, "未取得通過來源時間、新鮮度與契約檢查的結果。");
       });
   }
 })();

@@ -1,6 +1,6 @@
 # Security Scan Evidence
 
-Review date: 2026-09-10
+Review date: 2026-09-11
 Owner: repository owner
 Scope: PUBLIC_EXPORT_MANIFEST.json allowlisted files
 
@@ -8,7 +8,7 @@ Scope: PUBLIC_EXPORT_MANIFEST.json allowlisted files
 
 - Python and JavaScript syntax checks: PASS
 - Playwright responsive visual smoke: PASS on 1440x900 and 390x844
-- Unit and integration tests: 17 passed
+- Unit and integration tests: 22 passed
 - LocalGuard development safety gate: 0 findings after remediation
 - AI Security export gate: PASS, 0 blocking
 - Release boundary safety gate: 0 findings, 0 blocking
@@ -21,6 +21,9 @@ Scope: PUBLIC_EXPORT_MANIFEST.json allowlisted files
 - Kept API responses and browser requests on no-store cache policy.
 - Removed remote algorithm mode from the published result contract.
 - Enforced an exact public static-file allowlist.
+- Allowed only the explicit `mode=offline` query on the public index; unknown index queries remain blocked.
+- Enforced LIVE result, response, and source timestamp freshness with stale, future, and missing-value rejection tests.
+- Removed exact percentage labels from the public historical SVG while retaining intervalized trend direction.
 
 ## Reviewed Tool Finding
 

@@ -4,7 +4,7 @@
   "district_label": "District A",
   "priority_band": "critical",
   "confidence_band": "high",
-  "snapshot_freshness": "live_on_cycle",
+  "snapshot_freshness": "delayed",
   "dispatch_candidate_count": 2,
   "resource_plan": {
     "motorcycle_tasks": 1,

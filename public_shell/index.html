@@ -19,7 +19,7 @@
 
       <section class="status-strip" aria-label="summary">
         <div class="metric">
-          <span>區域</span>
+          <span>本次重點區</span>
           <strong id="metric-districts">-</strong>
         </div>
         <div class="metric critical">
@@ -48,6 +48,24 @@
         <p id="operator-message">-</p>
       </section>
 
+      <section class="lineage-strip" aria-label="data lineage">
+        <div class="lineage-item">
+          <span>歷史涵蓋</span>
+          <strong>2026-01 至 2026-09-11</strong>
+          <p>29 區彙整特徵；公開值已區間化並做時間錯位，只保留趨勢，不能還原單站或精確比例。</p>
+        </div>
+        <div class="lineage-item">
+          <span>近期批次證據</span>
+          <strong>2026-09-08 19:16 至 2026-09-11 01:38</strong>
+          <p>313 批、500,824 筆快照列、1,606 站點維度；完整性只代表 9/8 至 9/11 的已標日期觀察窗。</p>
+        </div>
+        <div class="lineage-item">
+          <span>目前資料模式</span>
+          <strong id="lineage-mode">載入中</strong>
+          <p id="lineage-freshness">等待來源時間、新鮮度與契約檢查。</p>
+        </div>
+      </section>
+
       <section class="layout">
         <div class="panel">
           <div class="panel-heading">
@@ -70,22 +88,26 @@
         <div class="evidence-heading">
           <div>
             <p class="eyebrow">Data evidence</p>
-            <h2 id="evidence-title">壓縮快照與天氣特徵</h2>
+            <h2 id="evidence-title">歷史覆蓋、壓縮快照與天氣特徵</h2>
           </div>
-          <span>只含不可逆摘要</span>
+          <span>公開備查摘要，非原始逐筆資料</span>
         </div>
         <div class="evidence-grid">
           <figure>
+            <img src="./media/historical-coverage.svg" alt="2026 年 1 月至 8 月新北 29 區歷史彙整特徵">
+            <figcaption>歷史涵蓋：2026-01 至 2026-09-11 的 29 區彙整趨勢；是固定備查版本，不是 9 月即時值。</figcaption>
+          </figure>
+          <figure>
             <img src="./media/snapshot.svg" alt="2026 年 9 月 8 日獨立壓縮快照驗證摘要">
-            <figcaption>9/8 獨立壓縮包：18 批快照、29 區天氣與完整性證據。</figcaption>
+            <figcaption>近期影子線：9/8 至 9/11 持續流入，最新時間以私有驗證清單為準。</figcaption>
           </figure>
           <figure>
             <img src="./media/weather-bike.svg" alt="不同天氣條件下的 YouBike 車輛比例歷史特徵曲線">
-            <figcaption>歷史基準：8/3–8/14 天氣條件與車輛比例特徵，不宣稱為 9/10 即時值。</figcaption>
+            <figcaption>天氣與車輛特徵：用於歷史基準和近期流入快照比較，不呈現核心權重。</figcaption>
           </figure>
           <figure>
             <img src="./media/weather-temperature.svg" alt="不同天氣條件下的溫度歷史特徵曲線">
-            <figcaption>歷史基準：8/3–8/14 溫度特徵，用於和近期觀察窗結果比對。</figcaption>
+            <figcaption>溫度與降雨特徵：作為區域狀態的說明證據，不參與前端自行決策。</figcaption>
           </figure>
         </div>
       </section>

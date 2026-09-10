@@ -1,25 +1,25 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="620" viewBox="0 0 1200 620" role="img" aria-labelledby="title desc">
   <title id="title">9 月獨立壓縮快照驗證摘要</title>
-  <desc id="desc">2026年9月8日兩小時壓縮快照、天氣資料與歷史特徵基準的不可逆摘要。</desc>
+  <desc id="desc">2026年9月8日至11日近期流入快照、天氣資料與歷史特徵基準的安全摘要。</desc>
   <rect width="1200" height="620" fill="#ffffff"/>
   <text x="64" y="70" font-family="Arial, Noto Sans TC, sans-serif" font-size="34" font-weight="700" fill="#17202a">9 月獨立壓縮快照</text>
-  <text x="64" y="106" font-family="Arial, Noto Sans TC, sans-serif" font-size="18" fill="#5d6978">驗證完成 · integrity ok · 不含原始站點資料</text>
+  <text x="64" y="106" font-family="Arial, Noto Sans TC, sans-serif" font-size="18" fill="#5d6978">該批完整性驗證完成 · integrity ok · 不含原始站點資料</text>
   <line x1="64" y1="138" x2="1136" y2="138" stroke="#d7dee8"/>
   <g font-family="Arial, Noto Sans TC, sans-serif">
     <rect x="64" y="178" width="248" height="128" rx="8" fill="#eaf1ff" stroke="#b8c8e8"/>
-    <text x="88" y="218" font-size="17" fill="#5d6978">站點維度</text><text x="88" y="272" font-size="42" font-weight="700" fill="#2454a6">1,600</text>
+    <text x="88" y="218" font-size="17" fill="#5d6978">站點維度</text><text x="88" y="272" font-size="42" font-weight="700" fill="#2454a6">1,606</text>
     <rect x="336" y="178" width="248" height="128" rx="8" fill="#eaf7f1" stroke="#bfe5d4"/>
-    <text x="360" y="218" font-size="17" fill="#5d6978">壓縮快照列</text><text x="360" y="272" font-size="42" font-weight="700" fill="#147253">28,800</text>
+    <text x="360" y="218" font-size="17" fill="#5d6978">壓縮快照列</text><text x="360" y="272" font-size="42" font-weight="700" fill="#147253">500,824</text>
     <rect x="608" y="178" width="248" height="128" rx="8" fill="#fff6db" stroke="#ecd38a"/>
-    <text x="632" y="218" font-size="17" fill="#5d6978">觀察批次</text><text x="632" y="272" font-size="42" font-weight="700" fill="#9a6700">18</text>
+    <text x="632" y="218" font-size="17" fill="#5d6978">觀察批次</text><text x="632" y="272" font-size="42" font-weight="700" fill="#9a6700">313</text>
     <rect x="880" y="178" width="256" height="128" rx="8" fill="#fff0ed" stroke="#f2b6ad"/>
     <text x="904" y="218" font-size="17" fill="#5d6978">歷史特徵列</text><text x="904" y="272" font-size="42" font-weight="700" fill="#b42318">576</text>
     <text x="64" y="360" font-size="18" font-weight="700" fill="#17202a">觀察時間</text>
     <line x1="64" y1="402" x2="1136" y2="402" stroke="#2454a6" stroke-width="5"/>
     <circle cx="64" cy="402" r="10" fill="#2454a6"/><circle cx="1136" cy="402" r="10" fill="#2454a6"/>
-    <text x="64" y="440" font-size="17" fill="#17202a">2026-09-08 19:14</text><text x="1136" y="440" text-anchor="end" font-size="17" fill="#17202a">2026-09-08 21:14</text>
+    <text x="64" y="440" font-size="17" fill="#17202a">2026-09-08 19:16</text><text x="1136" y="440" text-anchor="end" font-size="17" fill="#17202a">2026-09-11 01:38</text>
     <text x="64" y="500" font-size="18" font-weight="700" fill="#17202a">同批天氣證據</text>
-    <text x="64" y="536" font-size="19" fill="#5d6978">29 區塊 · 14,616 筆小時預報 · 最新收集 2026-09-08 20:51</text>
+    <text x="64" y="536" font-size="19" fill="#5d6978">29 區塊 · 18 批 · 114,144 筆小時預報 · 最新收集 2026-09-10 22:46</text>
     <text x="64" y="580" font-size="15" fill="#5d6978">公開素材只保留批次、時間、筆數與雜湊驗證；站名、站號、座標、庫存、權重與閾值均不包含。</text>
   </g>
 </svg>

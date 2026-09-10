@@ -88,6 +88,7 @@ h2 {
 
 .metric,
 .notice,
+.lineage-item,
 .panel {
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -148,6 +149,37 @@ h2 {
 .notice p {
   color: var(--muted);
   line-height: 1.55;
+}
+
+.lineage-strip {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 18px;
+}
+
+.lineage-item {
+  min-height: 112px;
+  padding: 14px;
+}
+
+.lineage-item span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.lineage-item strong {
+  display: block;
+  margin-top: 7px;
+  font-size: 15px;
+}
+
+.lineage-item p {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
 }
 
 .layout {
@@ -309,7 +341,7 @@ h2 {
 
 .evidence-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
 }
 
@@ -346,6 +378,7 @@ h2 {
 
   .toolbar,
   .notice,
+  .lineage-strip,
   .layout,
   .evidence-grid {
     grid-template-columns: 1fr;

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from copy import deepcopy
+from datetime import datetime, timedelta, timezone
 import json
 from pathlib import Path
 import socket
@@ -11,6 +13,12 @@ import unittest
 from urllib import error, request
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "public_shell"))
+
+from serve_public_blackbox_gateway import (
+    validate_recent_timestamp,
+    validate_sealed_result,
+)
 
 
 def free_port() -> int:
@@ -88,7 +96,7 @@ class PublicGatewayTests(unittest.TestCase):
             result["runtime_mode"],
         )
         tasks = self.get_json("/api/handoff/tasks")["tasks"]
-        self.assertEqual(3, len(tasks))
+        self.assertEqual(6, len(tasks))
         task_id = tasks[0]["task_id"]
         with request.urlopen(
             self.base
@@ -123,6 +131,19 @@ class PublicGatewayTests(unittest.TestCase):
         ) as response:
             self.assertEqual(200, response.status)
 
+    def test_index_allows_only_explicit_offline_query(self) -> None:
+        with request.urlopen(
+            self.base + "/public_shell/index.html?mode=offline",
+            timeout=2,
+        ) as response:
+            self.assertEqual(200, response.status)
+        with self.assertRaises(error.HTTPError) as blocked:
+            request.urlopen(
+                self.base + "/public_shell/index.html?mode=live",
+                timeout=2,
+            )
+        self.assertEqual(404, blocked.exception.code)
+
     def test_task_page_allows_only_valid_task_query(self) -> None:
         tasks = self.get_json("/api/handoff/tasks")["tasks"]
         task_id = tasks[0]["task_id"]
@@ -150,6 +171,76 @@ class PublicGatewayTests(unittest.TestCase):
                 timeout=2,
             )
         self.assertEqual(404, blocked.exception.code)
+
+    def test_time_gate_rejects_stale_future_and_missing(self) -> None:
+        now = datetime(2026, 9, 10, 12, 0, tzinfo=timezone.utc)
+        stale = (now - timedelta(minutes=31)).isoformat()
+        future = (now + timedelta(minutes=6)).isoformat()
+        for field_name in (
+            "live_result_generated_at",
+            "blackbox_response_generated_at",
+            "source_snapshot_at",
+        ):
+            with self.subTest(field=field_name, case="stale"):
+                with self.assertRaisesRegex(
+                    ValueError,
+                    f"{field_name}_stale",
+                ):
+                    validate_recent_timestamp(
+                        stale,
+                        field_name,
+                        now=now,
+                    )
+            with self.subTest(field=field_name, case="future"):
+                with self.assertRaisesRegex(
+                    ValueError,
+                    f"{field_name}_future",
+                ):
+                    validate_recent_timestamp(
+                        future,
+                        field_name,
+                        now=now,
+                    )
+            with self.subTest(field=field_name, case="missing"):
+                with self.assertRaisesRegex(
+                    ValueError,
+                    f"{field_name}_missing",
+                ):
+                    validate_recent_timestamp(
+                        None,
+                        field_name,
+                        now=now,
+                    )
+
+    def test_stale_live_result_is_rejected(self) -> None:
+        live = deepcopy(
+            json.loads(
+                (ROOT / "fixtures" / "sealed.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+        )
+        live["runtime_mode"] = "LIVE_LOCAL_SANDBOX"
+        live["generated_at"] = (
+            datetime.now(timezone.utc) - timedelta(hours=2)
+        ).astimezone(
+            timezone(timedelta(hours=8))
+        ).isoformat(timespec="seconds")
+        live["demo_scope"]["data_class"] = (
+            "sealed_blackbox_result"
+        )
+        live["demo_scope"]["public_claim"] = (
+            "private_algorithm_attached"
+        )
+        live["proof_boundary"]["signature_policy"] = (
+            "signed_response_required"
+        )
+        live["edge_status"]["gateway_mode"] = "blackbox_api"
+        with self.assertRaisesRegex(
+            ValueError,
+            "live_result_generated_at_stale",
+        ):
+            validate_sealed_result(live)
 
 
 if __name__ == "__main__":

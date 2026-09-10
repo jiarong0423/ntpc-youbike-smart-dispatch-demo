@@ -25,6 +25,8 @@ from task_ledger import TaskStore
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_BLACKBOX_URL = "http://127.0.0.1:8781/api/v1/dispatch/evaluate"
 MAX_BODY_BYTES = 16 * 1024
+MAX_LIVE_RESULT_AGE_SECONDS = 30 * 60
+MAX_FUTURE_SKEW_SECONDS = 5 * 60
 SEALED_RESULT_SCHEMA = json.loads((PROJECT_ROOT / "contracts" / "sealed_result.schema.json").read_text(encoding="utf-8"))
 SEALED_RESULT_VALIDATOR = Draft202012Validator(SEALED_RESULT_SCHEMA, format_checker=FormatChecker())
 STATIC_PATHS = {
@@ -34,6 +36,7 @@ STATIC_PATHS = {
     "/public_shell/task.html",
     "/public_shell/task.js",
     "/public_shell/task.css",
+    "/public_shell/media/historical-coverage.svg",
     "/public_shell/media/snapshot.svg",
     "/public_shell/media/weather-bike.svg",
     "/public_shell/media/weather-temperature.svg",
@@ -92,6 +95,34 @@ def build_request() -> dict[str, Any]:
     }
 
 
+def validate_recent_timestamp(
+    value: Any,
+    field_name: str,
+    *,
+    now: datetime | None = None,
+) -> datetime:
+    if not isinstance(value, str):
+        raise ValueError(f"{field_name}_missing")
+    try:
+        parsed = datetime.fromisoformat(
+            value.replace("Z", "+00:00")
+        )
+    except ValueError as exc:
+        raise ValueError(f"{field_name}_invalid") from exc
+    if parsed.tzinfo is None:
+        raise ValueError(f"{field_name}_timezone_missing")
+    current = now or datetime.now(timezone.utc)
+    age_seconds = (
+        current.astimezone(timezone.utc)
+        - parsed.astimezone(timezone.utc)
+    ).total_seconds()
+    if age_seconds < -MAX_FUTURE_SKEW_SECONDS:
+        raise ValueError(f"{field_name}_future")
+    if age_seconds > MAX_LIVE_RESULT_AGE_SECONDS:
+        raise ValueError(f"{field_name}_stale")
+    return parsed
+
+
 def validate_sealed_result(result: Any) -> dict[str, Any]:
     schema_errors = sorted(SEALED_RESULT_VALIDATOR.iter_errors(result), key=lambda item: list(item.path))
     if schema_errors:
@@ -125,6 +156,11 @@ def validate_sealed_result(result: Any) -> dict[str, Any]:
         or not isinstance(result.get("selected_cases"), list)
     ):
         raise ValueError("sealed_result_schema_invalid")
+    if result["runtime_mode"] == "LIVE_LOCAL_SANDBOX":
+        validate_recent_timestamp(
+            result["generated_at"],
+            "live_result_generated_at",
+        )
     for item in result["selected_cases"]:
         if (
             not isinstance(item, dict)
@@ -173,7 +209,28 @@ def fetch_blackbox_result(
         or wrapped.get("request_id") != body["request_id"]
     ):
         raise ValueError("blackbox_response_schema_invalid")
+    validate_recent_timestamp(
+        wrapped.get("generated_at"),
+        "blackbox_response_generated_at",
+    )
     result = validate_sealed_result(wrapped.get("result"))
+    source_snapshot_at = wrapped.get("source_snapshot_at")
+    if result["runtime_mode"] == "LIVE_LOCAL_SANDBOX":
+        validate_recent_timestamp(
+            source_snapshot_at,
+            "source_snapshot_at",
+        )
+    else:
+        if not isinstance(source_snapshot_at, str):
+            raise ValueError("source_snapshot_at_missing")
+        try:
+            parsed_source = datetime.fromisoformat(
+                source_snapshot_at.replace("Z", "+00:00")
+            )
+        except ValueError as exc:
+            raise ValueError("source_snapshot_at_invalid") from exc
+        if parsed_source.tzinfo is None:
+            raise ValueError("source_snapshot_at_timezone_missing")
     expected_hash = hashlib.sha256(
         canonical_json(result)
     ).hexdigest()
@@ -522,6 +579,16 @@ class GatewayHandler(SimpleHTTPRequestHandler):
                 HTTPStatus.NOT_FOUND
             )
 
+        if path == "/public_shell/index.html":
+            query = parse.parse_qs(
+                parsed_path.query,
+                keep_blank_values=True,
+            )
+            if (
+                not parsed_path.query
+                or query == {"mode": ["offline"]}
+            ):
+                return super().do_GET()
         if (
             not parsed_path.query
             and path in STATIC_PATHS
@@ -610,6 +677,16 @@ class GatewayHandler(SimpleHTTPRequestHandler):
             self.send_header("Location", "/public_shell/index.html")
             self.end_headers()
             return None
+        if parsed_path.path == "/public_shell/index.html":
+            query = parse.parse_qs(
+                parsed_path.query,
+                keep_blank_values=True,
+            )
+            if (
+                not parsed_path.query
+                or query == {"mode": ["offline"]}
+            ):
+                return super().do_HEAD()
         if (
             not parsed_path.query
             and parsed_path.path in STATIC_PATHS

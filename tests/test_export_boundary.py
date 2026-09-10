@@ -85,6 +85,37 @@ class ExportBoundaryTests(unittest.TestCase):
         ]
         self.assertEqual([], offenders)
 
+    def test_windows_offline_fixture_exists(self) -> None:
+        launcher = (
+            ROOT / "public_shell" / "start_windows.cmd"
+        ).read_text(encoding="utf-8")
+        self.assertIn(
+            r"--offline-fixture fixtures\sealed.json",
+            launcher,
+        )
+        self.assertTrue((ROOT / "fixtures" / "sealed.json").is_file())
+
+    def test_public_data_lineage_is_explicit(self) -> None:
+        index = (
+            ROOT / "public_shell" / "index.html"
+        ).read_text(encoding="utf-8")
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        historical = (
+            ROOT / "public_shell" / "media" / "historical-coverage.svg"
+        ).read_text(encoding="utf-8")
+        self.assertIn("2026-01 至 2026-09-11", index)
+        self.assertIn("2026-09-08 19:16 至 2026-09-11 01:38", index)
+        self.assertIn("本次重點區", index)
+        self.assertIn("313 批", index)
+        self.assertIn("1,606 站點維度", index)
+        self.assertIn('id="lineage-mode"', index)
+        self.assertIn('id="lineage-freshness"', index)
+        self.assertIn("固定 29 區安全轉換資料", readme)
+        self.assertIn("區間化", historical)
+        self.assertIn("時間錯位", historical)
+        self.assertIn("不能還原單站或精確比例", historical)
+        self.assertNotRegex(historical, r">\d+\.\d+%</text>")
+
     def test_no_local_paths_secrets_or_algorithm_formulas(self) -> None:
         findings = []
         for path in self.public_files():
