@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="icon" href="data:,">
+    <title>新北 YouBike 智慧調度任務池</title>
+    <link rel="stylesheet" href="./styles.css">
+  </head>
+  <body>
+    <main class="shell">
+      <section class="toolbar" aria-label="sealed result status">
+        <div>
+          <p class="eyebrow">District dispatch operations</p>
+          <h1>新北 YouBike 智慧調度任務池</h1>
+        </div>
+        <div class="mode" id="mode-banner">載入中</div>
+      </section>
+
+      <section class="status-strip" aria-label="summary">
+        <div class="metric">
+          <span>區域</span>
+          <strong id="metric-districts">-</strong>
+        </div>
+        <div class="metric critical">
+          <span>Critical</span>
+          <strong id="metric-critical">-</strong>
+        </div>
+        <div class="metric warning">
+          <span>Watch</span>
+          <strong id="metric-warning">-</strong>
+        </div>
+        <div class="metric stable">
+          <span>Stable</span>
+          <strong id="metric-stable">-</strong>
+        </div>
+        <div class="metric">
+          <span>Cases</span>
+          <strong id="metric-cases">-</strong>
+        </div>
+      </section>
+
+      <section class="notice" aria-label="proof boundary">
+        <div>
+          <span class="label">Boundary</span>
+          <strong id="boundary-text">-</strong>
+        </div>
+        <p id="operator-message">-</p>
+      </section>
+
+      <section class="layout">
+        <div class="panel">
+          <div class="panel-heading">
+            <h2>區域決策層</h2>
+            <span id="scope-label">-</span>
+          </div>
+          <div class="district-list" id="district-list"></div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-heading">
+            <h2>派工與交接</h2>
+            <span id="case-label">-</span>
+          </div>
+          <div class="case-list" id="case-list"></div>
+        </div>
+      </section>
+
+      <section class="evidence-band" aria-labelledby="evidence-title">
+        <div class="evidence-heading">
+          <div>
+            <p class="eyebrow">Data evidence</p>
+            <h2 id="evidence-title">壓縮快照與天氣特徵</h2>
+          </div>
+          <span>只含不可逆摘要</span>
+        </div>
+        <div class="evidence-grid">
+          <figure>
+            <img src="./media/snapshot.svg" alt="2026 年 9 月 8 日獨立壓縮快照驗證摘要">
+            <figcaption>9/8 獨立壓縮包：18 批快照、29 區天氣與完整性證據。</figcaption>
+          </figure>
+          <figure>
+            <img src="./media/weather-bike.svg" alt="不同天氣條件下的 YouBike 車輛比例歷史特徵曲線">
+            <figcaption>歷史基準：8/3–8/14 天氣條件與車輛比例特徵，不宣稱為 9/10 即時值。</figcaption>
+          </figure>
+          <figure>
+            <img src="./media/weather-temperature.svg" alt="不同天氣條件下的溫度歷史特徵曲線">
+            <figcaption>歷史基準：8/3–8/14 溫度特徵，用於和近期觀察窗結果比對。</figcaption>
+          </figure>
+        </div>
+      </section>
+
+    </main>
+
+    <template id="district-template">
+      <article class="district-row">
+        <div class="rank"></div>
+        <div class="district-main">
+          <div class="row-title">
+            <strong class="name"></strong>
+            <span class="band"></span>
+          </div>
+          <p class="explanation"></p>
+        </div>
+        <div class="action"></div>
+      </article>
+    </template>
+
+    <template id="case-template">
+      <article class="case-row">
+        <div class="row-title">
+          <strong class="name"></strong>
+          <span class="band"></span>
+        </div>
+        <p class="explanation"></p>
+        <div class="case-meta">
+          <span class="action"></span>
+          <span class="route"></span>
+          <a class="task-link" href="#">開啟任務</a>
+        </div>
+      </article>
+    </template>
+
+    <script src="./app.js"></script>
+  </body>
+</html>

@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/ntpc-youbike/task_event_request.schema.json",
+  "title": "Public task event",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["event_id", "event_type", "actor_alias"],
+  "properties": {
+    "event_id": {
+      "type": "string",
+      "pattern": "^evt-[A-Za-z0-9_-]{8,80}$"
+    },
+    "event_type": {
+      "type": "string",
+      "enum": ["claim", "arrive", "complete", "exception"]
+    },
+    "actor_alias": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{1,24}$"
+    }
+  }
+}

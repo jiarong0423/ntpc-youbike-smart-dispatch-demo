@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="520" viewBox="0 0 980 520">
+<rect width="100%" height="100%" fill="#ffffff"/>
+<text x="72" y="30" font-family="Arial, Noto Sans TC, sans-serif" font-size="22" font-weight="700" fill="#17202a">天氣條件 temperature</text>
+<text x="72" y="502" font-family="Arial, Noto Sans TC, sans-serif" font-size="12" fill="#566573">hour bucket</text>
+<text x="18" y="66" font-family="Arial, Noto Sans TC, sans-serif" font-size="12" fill="#566573">temperature C</text>
+<line x1="72" y1="54" x2="72" y2="456" stroke="#5d6d7e" stroke-width="1"/>
+<line x1="72" y1="456" x2="956" y2="456" stroke="#5d6d7e" stroke-width="1"/>
+<line x1="72.00" y1="54" x2="72.00" y2="456" stroke="#edf2f7" stroke-width="1"/>
+<text x="72.00" y="478" text-anchor="middle" font-family="Arial" font-size="11" fill="#566573">0</text>
+<line x1="187.30" y1="54" x2="187.30" y2="456" stroke="#edf2f7" stroke-width="1"/>
+<text x="187.30" y="478" text-anchor="middle" font-family="Arial" font-size="11" fill="#566573">3</text>
+<line x1="302.61" y1="54" x2="302.61" y2="456" stroke="#edf2f7" stroke-width="1"/>
+<text x="302.61" y="478" text-anchor="middle" font-family="Arial" font-size="11" fill="#566573">6</text>
+<line x1="417.91" y1="54" x2="417.91" y2="456" stroke="#edf2f7" stroke-width="1"/>
+<text x="417.91" y="478" text-anchor="middle" font-family="Arial" font-size="11" fill="#566573">9</text>
+<line x1="533.22" y1="54" x2="533.22" y2="456" stroke="#edf2f7" stroke-width="1"/>
+<text x="533.22" y="478" text-anchor="middle" font-family="Arial" font-size="11" fill="#566573">12</text>
+<line x1="648.52" y1="54" x2="648.52" y2="456" stroke="#edf2f7" stroke-width="1"/>
+<text x="648.52" y="478" text-anchor="middle" font-family="Arial" font-size="11" fill="#566573">15</text>
+<line x1="763.83" y1="54" x2="763.83" y2="456" stroke="#edf2f7" stroke-width="1"/>
+<text x="763.83" y="478" text-anchor="middle" font-family="Arial" font-size="11" fill="#566573">18</text>
+<line x1="879.13" y1="54" x2="879.13" y2="456" stroke="#edf2f7" stroke-width="1"/>
+<text x="879.13" y="478" text-anchor="middle" font-family="Arial" font-size="11" fill="#566573">21</text>
+<line x1="72" y1="456.00" x2="956" y2="456.00" stroke="#edf2f7" stroke-width="1"/>
+<text x="62" y="460.00" text-anchor="end" font-family="Arial" font-size="11" fill="#566573">23.399</text>
+<line x1="72" y1="355.50" x2="956" y2="355.50" stroke="#edf2f7" stroke-width="1"/>
+<text x="62" y="359.50" text-anchor="end" font-family="Arial" font-size="11" fill="#566573">26.208</text>
+<line x1="72" y1="255.00" x2="956" y2="255.00" stroke="#edf2f7" stroke-width="1"/>
+<text x="62" y="259.00" text-anchor="end" font-family="Arial" font-size="11" fill="#566573">29.018</text>
+<line x1="72" y1="154.50" x2="956" y2="154.50" stroke="#edf2f7" stroke-width="1"/>
+<text x="62" y="158.50" text-anchor="end" font-family="Arial" font-size="11" fill="#566573">31.828</text>
+<line x1="72" y1="54.00" x2="956" y2="54.00" stroke="#edf2f7" stroke-width="1"/>
+<text x="62" y="58.00" text-anchor="end" font-family="Arial" font-size="11" fill="#566573">34.638</text>
+<line x1="72" y1="48" x2="96" y2="48" stroke="#1f77b4" stroke-width="3"/>
+<text x="102" y="52" font-family="Arial, Noto Sans TC, sans-serif" font-size="12" fill="#17202a">一般平日</text>
+<line x1="210" y1="48" x2="234" y2="48" stroke="#2ca02c" stroke-width="3"/>
+<text x="240" y="52" font-family="Arial, Noto Sans TC, sans-serif" font-size="12" fill="#17202a">一般週末</text>
+<line x1="348" y1="48" x2="372" y2="48" stroke="#4c78a8" stroke-width="3"/>
+<text x="378" y="52" font-family="Arial, Noto Sans TC, sans-serif" font-size="12" fill="#17202a">雨天</text>
+<line x1="486" y1="48" x2="510" y2="48" stroke="#1b4f72" stroke-width="3"/>
+<text x="516" y="52" font-family="Arial, Noto Sans TC, sans-serif" font-size="12" fill="#17202a">大雨天</text>
+<line x1="624" y1="48" x2="648" y2="48" stroke="#c0392b" stroke-width="3"/>
+<text x="654" y="52" font-family="Arial, Noto Sans TC, sans-serif" font-size="12" fill="#17202a">高溫天</text>
+<polyline points="72.00,323.82 110.43,334.73 148.87,338.51 187.30,350.85 225.74,358.19 264.17,360.00 302.61,344.81 341.04,292.38 379.48,231.67 417.91,188.16 456.35,147.55 494.78,114.39 533.22,92.90 571.65,96.07 610.09,99.98 648.52,129.35 686.96,160.09 725.39,189.30 763.83,224.44 802.26,259.87 840.70,278.70 879.13,296.76 917.57,310.55 956.00,322.00" fill="none" stroke="#1f77b4" stroke-width="2.8" stroke-linejoin="round" stroke-linecap="round"/>
+<polyline points="72.00,389.84 110.43,403.16 148.87,414.45 187.30,417.10 225.74,410.13 264.17,407.72 302.61,409.94 341.04,410.37 379.48,389.04 417.91,378.86 456.35,362.46 494.78,357.52 533.22,342.79 571.65,318.80 610.09,302.45 648.52,294.19 686.96,293.70 725.39,288.83 763.83,284.88 802.26,290.61 840.70,290.43 879.13,298.75 917.57,311.46 956.00,326.07" fill="none" stroke="#2ca02c" stroke-width="2.8" stroke-linejoin="round" stroke-linecap="round"/>
+<polyline points="72.00,336.41 110.43,348.93 148.87,356.48 187.30,366.44 225.74,369.17 264.17,367.58 302.61,354.01 341.04,317.01 379.48,269.03 417.91,232.84 456.35,197.83 494.78,171.05 533.22,151.43 571.65,149.63 610.09,148.24 648.52,168.18 686.96,191.55 725.39,210.89 763.83,235.81 802.26,263.91 840.70,282.76 879.13,298.79 917.57,312.04 956.00,323.90" fill="none" stroke="#4c78a8" stroke-width="2.8" stroke-linejoin="round" stroke-linecap="round"/>
+<polyline points="72.00,342.38 110.43,352.59 148.87,358.15 187.30,367.53 225.74,369.79 264.17,369.50 302.61,359.24 341.04,324.98 379.48,278.00 417.91,242.64 456.35,208.05 494.78,181.75 533.22,162.75 571.65,162.83 610.09,161.76 648.52,182.40 686.96,205.41 725.39,223.03 763.83,245.63 802.26,270.87 840.70,286.93 879.13,302.04 917.57,314.96 956.00,326.90" fill="none" stroke="#1b4f72" stroke-width="2.8" stroke-linejoin="round" stroke-linecap="round"/>
+<polyline points="72.00,330.78 110.43,341.59 148.87,345.25 187.30,356.54 225.74,362.68 264.17,364.13 302.61,351.25 341.04,303.96 379.48,245.25 417.91,204.79 456.35,166.78 494.78,134.97 533.22,112.76 571.65,112.34 610.09,113.42 648.52,139.06 686.96,166.75 725.39,192.97 763.83,223.80 802.26,254.86 840.70,271.65 879.13,288.94 917.57,303.19 956.00,315.66" fill="none" stroke="#c0392b" stroke-width="2.8" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

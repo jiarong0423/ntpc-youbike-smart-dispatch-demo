@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/soong-youbike/contracts/blackbox_response.schema.json",
+  "title": "YouBike Black Box Evaluation Response",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "request_id",
+    "generated_at",
+    "source_snapshot_at",
+    "credential_expires_at",
+    "result_sha256",
+    "result"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "youbike.blackbox_response.v1"
+    },
+    "request_id": {
+      "type": "string",
+      "pattern": "^req-[a-z0-9][a-z0-9-]{8,80}$"
+    },
+    "generated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "source_snapshot_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "credential_expires_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "result_sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "result": {
+      "$ref": "sealed_result.schema.json"
+    }
+  }
+}

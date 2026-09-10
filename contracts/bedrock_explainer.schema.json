@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/ntpc-youbike/bedrock_explainer.schema.json",
+  "title": "Sanitized Bedrock explanation payload",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "scope",
+    "district_label",
+    "priority_band",
+    "confidence_band",
+    "snapshot_freshness",
+    "dispatch_candidate_count",
+    "resource_plan",
+    "reason_tags",
+    "policy_boundary"
+  ],
+  "properties": {
+    "schema": {"const": "yb.explain.v2"},
+    "scope": {"const": "district.summary"},
+    "district_label": {"type": "string", "pattern": "^District [A-Z]$"},
+    "priority_band": {
+      "type": "string",
+      "enum": ["critical", "warning", "stable"]
+    },
+    "confidence_band": {
+      "type": "string",
+      "enum": ["high", "medium", "low"]
+    },
+    "snapshot_freshness": {
+      "type": "string",
+      "enum": ["live_on_cycle", "delayed", "unavailable"]
+    },
+    "dispatch_candidate_count": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 5
+    },
+    "resource_plan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["motorcycle_tasks", "truck_tasks"],
+      "properties": {
+        "motorcycle_tasks": {"type": "integer", "minimum": 0, "maximum": 5},
+        "truck_tasks": {"type": "integer", "minimum": 0, "maximum": 5}
+      }
+    },
+    "reason_tags": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 3,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "enum": [
+          "historical_baseline_deviation",
+          "weather_context",
+          "commute_window"
+        ]
+      }
+    },
+    "policy_boundary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "bedrock_role",
+        "dispatch_decision_source",
+        "do_not_decide_dispatch",
+        "raw_data_sent",
+        "location_data_sent",
+        "identity_data_sent"
+      ],
+      "properties": {
+        "bedrock_role": {"const": "explain_only"},
+        "dispatch_decision_source": {"const": "local_private_algorithm"},
+        "do_not_decide_dispatch": {"const": true},
+        "raw_data_sent": {"const": false},
+        "location_data_sent": {"const": false},
+        "identity_data_sent": {"const": false}
+      }
+    }
+  }
+}

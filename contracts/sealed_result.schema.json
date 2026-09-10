@@ -1,0 +1,399 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/soong-youbike/contracts/sealed_result.schema.json",
+  "title": "YouBike Sealed Public Result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "package_id",
+    "generated_at",
+    "runtime_mode",
+    "demo_scope",
+    "proof_boundary",
+    "summary",
+    "districts",
+    "selected_cases",
+    "edge_status",
+    "comparison_keys"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "youbike.sealed_result.v1"
+    },
+    "package_id": {
+      "type": "string",
+      "pattern": "^sealed-[a-z0-9][a-z0-9-]{3,80}$"
+    },
+    "generated_at": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\+08:00$"
+    },
+    "runtime_mode": {
+      "type": "string",
+      "enum": [
+        "SEALED_DEMO_FIXTURE",
+        "LIVE_LOCAL_SANDBOX",
+        "PORTABLE_SEALED_FALLBACK"
+      ]
+    },
+    "demo_scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "city",
+        "as_of_label",
+        "data_class",
+        "public_claim"
+      ],
+      "properties": {
+        "city": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 40
+        },
+        "as_of_label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "data_class": {
+          "type": "string",
+          "enum": [
+            "synthetic_fixture",
+            "sealed_replay",
+            "signed_sandbox_result",
+            "sealed_blackbox_result"
+          ]
+        },
+        "public_claim": {
+          "type": "string",
+          "enum": [
+            "demo_only",
+            "poc_display",
+            "private_algorithm_attached"
+          ]
+        }
+      }
+    },
+    "proof_boundary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "algorithm_visibility",
+        "raw_data_visibility",
+        "frontend_calculation_policy",
+        "signature_policy"
+      ],
+      "properties": {
+        "algorithm_visibility": {
+          "type": "string",
+          "const": "black_box"
+        },
+        "raw_data_visibility": {
+          "type": "string",
+          "const": "not_in_public_package"
+        },
+        "frontend_calculation_policy": {
+          "type": "string",
+          "const": "display_only"
+        },
+        "signature_policy": {
+          "type": "string",
+          "enum": [
+            "fixture_unsigned",
+            "signed_response_required",
+            "integrity_hash_only"
+          ]
+        }
+      }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "district_count",
+        "critical_count",
+        "warning_count",
+        "stable_count",
+        "active_case_count",
+        "mode_banner",
+        "operator_message"
+      ],
+      "properties": {
+        "district_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 29
+        },
+        "critical_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 29
+        },
+        "warning_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 29
+        },
+        "stable_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 29
+        },
+        "active_case_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 20
+        },
+        "mode_banner": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "operator_message": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 240
+        }
+      }
+    },
+    "districts": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 29,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "district_id",
+          "name",
+          "priority_band",
+          "action_label",
+          "confidence_band",
+          "case_count",
+          "display_rank",
+          "explanation_text"
+        ],
+        "properties": {
+          "district_id": {
+            "type": "string",
+            "pattern": "^ntpc-[a-z0-9-]{2,40}$"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40
+          },
+          "priority_band": {
+            "type": "string",
+            "enum": [
+              "low",
+              "medium",
+              "high",
+              "critical"
+            ]
+          },
+          "action_label": {
+            "type": "string",
+            "enum": [
+              "add_bikes",
+              "pull_bikes",
+              "observe",
+              "rebalance_window"
+            ]
+          },
+          "confidence_band": {
+            "type": "string",
+            "enum": [
+              "low",
+              "medium",
+              "high"
+            ]
+          },
+          "case_count": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 20
+          },
+          "display_rank": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 29
+          },
+          "explanation_text": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 220
+          }
+        }
+      }
+    },
+    "selected_cases": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 20,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "case_id",
+          "district_id",
+          "display_name",
+          "priority_band",
+          "action_label",
+          "confidence_band",
+          "route_handoff",
+          "edge_hint",
+          "explanation_text"
+        ],
+        "properties": {
+          "case_id": {
+            "type": "string",
+            "pattern": "^case-[a-z0-9-]{4,60}$"
+          },
+          "district_id": {
+            "type": "string",
+            "pattern": "^ntpc-[a-z0-9-]{2,40}$"
+          },
+          "display_name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
+          },
+          "priority_band": {
+            "type": "string",
+            "enum": [
+              "low",
+              "medium",
+              "high",
+              "critical"
+            ]
+          },
+          "action_label": {
+            "type": "string",
+            "enum": [
+              "add_bikes",
+              "pull_bikes",
+              "observe",
+              "rebalance_window"
+            ]
+          },
+          "confidence_band": {
+            "type": "string",
+            "enum": [
+              "low",
+              "medium",
+              "high"
+            ]
+          },
+          "route_handoff": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "present",
+              "label",
+              "eta_band"
+            ],
+            "properties": {
+              "present": {
+                "type": "boolean"
+              },
+              "label": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 80
+              },
+              "eta_band": {
+                "type": "string",
+                "enum": [
+                  "none",
+                  "under_10m",
+                  "under_20m",
+                  "over_20m"
+                ]
+              }
+            }
+          },
+          "edge_hint": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "present",
+              "device_class",
+              "status_label"
+            ],
+            "properties": {
+              "present": {
+                "type": "boolean"
+              },
+              "device_class": {
+                "type": "string",
+                "enum": [
+                  "none"
+                ]
+              },
+              "status_label": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 80
+              }
+            }
+          },
+          "explanation_text": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 240
+          }
+        }
+      }
+    },
+    "edge_status": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "hardware_path",
+        "gateway_mode",
+        "last_smoke_label"
+      ],
+      "properties": {
+        "hardware_path": {
+          "type": "string",
+          "enum": [
+            "not_attached"
+          ]
+        },
+        "gateway_mode": {
+          "type": "string",
+          "enum": [
+            "fixture_only",
+            "blackbox_api"
+          ]
+        },
+        "last_smoke_label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        }
+      }
+    },
+    "comparison_keys": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 20,
+      "items": {
+        "type": "string",
+        "enum": [
+          "schema_version",
+          "runtime_mode",
+          "district_id",
+          "priority_band",
+          "action_label",
+          "confidence_band",
+          "route_handoff.present",
+          "mode_banner"
+        ]
+      }
+    }
+  }
+}
