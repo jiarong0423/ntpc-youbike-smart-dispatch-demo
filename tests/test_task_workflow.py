@@ -78,6 +78,26 @@ class TaskWorkflowTests(unittest.TestCase):
         self.store.seed_result(self.fixture)
         self.assertEqual("COMPLETED", TaskStore(self.db_path, ROOT).get_task(self.task_id)["status"])
 
+    def test_committed_event_remains_idempotent_after_retry_window(self) -> None:
+        event = self.event(
+            sequence=46,
+            event_type="accept",
+        )
+        code, first = self.store.apply_event(self.task_id, event)
+        self.assertEqual(200, code)
+        self.assertFalse(first["duplicate"])
+        with patch(
+            "task_ledger.time.time",
+            return_value=time.time() + 360,
+        ):
+            code, duplicate = self.store.apply_event(
+                self.task_id,
+                event,
+            )
+        self.assertEqual(200, code)
+        self.assertTrue(duplicate["duplicate"])
+        self.assertEqual((1, 0), self.counts())
+
     def test_reused_id_with_changed_request_is_conflict(self) -> None:
         self.accept()
         self.arrive()
@@ -140,14 +160,108 @@ class TaskWorkflowTests(unittest.TestCase):
             self.assertNotIn("never-store-me", str([tuple(row) for row in conn.execute("SELECT * FROM task_attempt").fetchall()]))
             self.assertEqual(4, len(conn.execute("PRAGMA table_info(task_attempt)").fetchall()) - 1)
 
-    def test_expired_and_other_process_signature_fail_closed(self) -> None:
+    def test_expired_task_and_other_process_signature_fail_closed(self) -> None:
         event = self.event()
         with patch("task_ledger.time.time", return_value=time.time() + 301):
-            event["occurred_at"] = datetime.fromtimestamp(time.time(), timezone.utc).isoformat()
-            self.assertEqual(403, self.store.apply_event(self.task_id, event)[0])
-        event = self.event()
-        self.assertEqual(403, TaskStore(self.db_path, ROOT).apply_event(self.task_id, event)[0])
-        self.assertEqual("OPEN", self.store.get_task(self.task_id)["status"])
+            event["occurred_at"] = datetime.fromtimestamp(
+                time.time(),
+                timezone.utc,
+            ).isoformat()
+            self.assertEqual(
+                410,
+                self.store.apply_event(self.task_id, event)[0],
+            )
+        self.assertEqual(
+            "EXPIRED",
+            self.store.get_task(self.task_id)["status"],
+        )
+        other_id = next(
+            task["task_id"]
+            for task in self.store.list_tasks()
+            if task["status"] == "OPEN"
+        )
+        event = self.event(task_id=other_id)
+        self.assertEqual(
+            403,
+            TaskStore(self.db_path, ROOT).apply_event(
+                other_id,
+                event,
+            )[0],
+        )
+        self.assertEqual(
+            "OPEN",
+            self.store.get_task(other_id)["status"],
+        )
+
+    def test_unaccepted_task_expires_in_read_only_view(self) -> None:
+        with closing(self.store.connect()) as conn:
+            stored = conn.execute(
+                "SELECT status, updated_at FROM task WHERE task_id=?",
+                (self.task_id,),
+            ).fetchone()
+        future = datetime.fromisoformat(stored["updated_at"]).timestamp() + 301
+        with patch("task_ledger.time.time", return_value=future):
+            self.assertEqual(
+                "EXPIRED",
+                self.store.get_task(self.task_id)["status"],
+            )
+        with closing(self.store.connect()) as conn:
+            unchanged = conn.execute(
+                "SELECT status, updated_at FROM task WHERE task_id=?",
+                (self.task_id,),
+            ).fetchone()
+        self.assertEqual(tuple(stored), tuple(unchanged))
+
+    def test_expired_accept_is_atomically_recorded_as_gone(self) -> None:
+        event = self.event(sequence=44, event_type="accept")
+        with closing(self.store.connect()) as conn:
+            updated_at = conn.execute(
+                "SELECT updated_at FROM task WHERE task_id=?",
+                (self.task_id,),
+            ).fetchone()[0]
+        future = datetime.fromisoformat(updated_at).timestamp() + 301
+        event["occurred_at"] = datetime.fromtimestamp(
+            future,
+            timezone.utc,
+        ).isoformat()
+        with patch("task_ledger.time.time", return_value=future):
+            code, body = self.store.apply_event(self.task_id, event)
+        self.assertEqual(410, code)
+        self.assertEqual("task_expired", body["error"])
+        self.assertEqual(
+            "EXPIRED",
+            self.store.get_task(self.task_id)["status"],
+        )
+        with closing(self.store.connect()) as conn:
+            events = [
+                tuple(row)
+                for row in conn.execute(
+                    """
+                    SELECT event_type,status_before,status_after
+                    FROM task_event
+                    WHERE task_id=?
+                    """,
+                    (self.task_id,),
+                ).fetchall()
+            ]
+        self.assertEqual(
+            [("expire", "OPEN", "EXPIRED")],
+            events,
+        )
+
+    def test_accepted_task_is_not_expired_or_reseeded(self) -> None:
+        self.accept(sequence=45)
+        before = self.store.get_task(self.task_id)
+        self.store.seed_result(self.fixture)
+        after = self.store.get_task(self.task_id)
+        future = datetime.fromisoformat(
+            before["updated_at"]
+        ).timestamp() + 301
+        with patch("task_ledger.time.time", return_value=future):
+            delayed = self.store.get_task(self.task_id)
+        self.assertEqual(before, after)
+        self.assertEqual("OPEN", delayed["status"])
+        self.assertTrue(delayed["accepted"])
 
     def test_unknown_task_and_wrong_type_are_audited(self) -> None:
         event = self.event()

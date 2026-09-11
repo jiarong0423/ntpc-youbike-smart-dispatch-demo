@@ -89,6 +89,14 @@ class ContractTests(unittest.TestCase):
         self.assertEqual([], list(validator.iter_errors(task)))
         task["arrived_at"] = None
         self.assertTrue(list(validator.iter_errors(task)))
+        task.update({
+            "status": "EXPIRED",
+            "accepted": False,
+            "accepted_at": None,
+            "arrived": False,
+            "arrived_at": None,
+        })
+        self.assertEqual([], list(validator.iter_errors(task)))
 
 
 if __name__ == "__main__":

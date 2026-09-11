@@ -8,9 +8,9 @@
 
 - 顯示 29 個行政區的優先級、行動建議與經欄位縮減、區間化處理的摘要
 - 從黑箱結果建立公開票單
-- 手機頁面依序執行「接單 → 確認抵達 → 完成任務」；每一步各自留下冪等事件，未抵達不能將 `OPEN` 原子更新為 `COMPLETED`
+- 手機頁面依序執行「接單 → 確認抵達 → 完成任務」；每一步各自留下冪等事件，未抵達不能將 `OPEN` 原子更新為 `COMPLETED`；五分鐘內未接單的任務由伺服器標為 `EXPIRED`
 - 本機模式以 SQLite 保存事件；AWS 任務 API 是待部署驗證的另一個儲存後端，兩者明確分離
-- 黑箱失效時 fail-closed，不拿舊資料冒充近期結果
+- 黑箱失效時 fail-closed；背景單一寫入同步先建立同代任務，再發布同代區域快照，瀏覽器讀取不觸發黑箱或任務寫入
 - 明確離線模式可展示經欄位縮減、區間化與時間位移處理的 29 區固定資料
 - 公開備查頁分開呈現 2026 年 1 至 9 月期間角色、近期批次與天氣特徵
 - Bedrock 只解釋經敏感欄位遮蔽的行政區摘要，不參與派工判斷
@@ -75,7 +75,9 @@ INSTALL_AND_RUN_WINDOWS.cmd offline
 
 ```mermaid
 flowchart LR
-  SOURCE["offline fixture or private live black box"] --> BFF["Windows BFF"]
+  SOURCE["offline fixture or private live black box"] --> SYNC["single-writer validation and sync"]
+  SYNC -->|"1. seed same-generation tasks"| MODE{"TASK_BACKEND"}
+  SYNC -->|"2. publish committed regional snapshot"| BFF["Windows BFF"]
   BFF --> MODE{"TASK_BACKEND"}
   MODE -->|local| DB["Local SQLite outside repo"]
   MODE -->|cloud| AWS["AWS HTTPS API / DynamoDB"]
@@ -97,6 +99,13 @@ Windows：
 
     public_shell\smoke_windows.cmd
 
+## 驗證與可重現性（加分項）
+
+驗證方式與重現步驟見 [TEST_EVIDENCE.md](TEST_EVIDENCE.md)，兩種模式分開記錄：
+
+- `OFFLINE_FIXTURE`（離線固定資料）：使用固定展示資料驗證操作流程，不代表即時結果。
+- `LIVE_LOCAL_SANDBOX`（本機 LIVE 黑箱）：驗證本機黑箱連線與操作流程；結果僅適用於本機，不代表 AWS 雲端驗收完成。
+
 ## Bedrock 說明層
 
 預設只產生請求檔，不呼叫付費服務：
@@ -115,7 +124,9 @@ Windows：
 
 ## 任務完成與雲端驗證邊界
 
-本機任務使用短效簽章（300 秒）、任務別、事件時間與每次授權的匿名短期加鹽雜湊。流程依序為掃碼、接單、確認抵達、完成；未接單不能抵達，未抵達不能完成。異常事件只寫稽核事件，不推進 `accepted_at`、`arrived_at` 或完成狀態。相同事件重送不重複更新，取消確認不送事件，驗證失敗只追加拒絕紀錄。簽章放在網址 fragment，不寫入存取日誌。瀏覽器不保存原始裝置識別資訊。
+本機任務使用短效簽章（300 秒）、任務別、事件時間與每次授權的匿名短期加鹽雜湊。流程依序為掃碼、接單、確認抵達、完成；未接單不能抵達，未抵達不能完成。五分鐘內未接單的任務由伺服器權威時間標為 `EXPIRED`，接單後不再自動失效。異常事件只寫稽核事件，不推進 `accepted_at`、`arrived_at` 或完成狀態。相同已提交事件重送會回傳相同成功結果，不重複更新；取消確認不送事件，驗證失敗只追加拒絕紀錄。簽章放在網址 fragment，不寫入存取日誌。瀏覽器不保存原始裝置識別資訊。
+
+LIVE 來源快照的允許期限為 30 分鐘；背景同步若連續 90 秒沒有完成一次合法抓取、任務寫入與 committed snapshot 發布，公開結果即 fail-closed。兩個期限用途不同：30 分鐘檢查資料來源新鮮度，90 秒檢查同步路徑是否仍在運作。
 
 本機簽章是公開示範能力，不能當作正式雲端操作者授權。服務重啟會使舊 QR 失效，請重新開啟任務頁產生 QR。接單、抵達時間與任務完成狀態保留在 SQLite。Schema v3 任務庫不會在啟動時自動修改；停止服務後，必須明確指定來源與全新備份位置執行 `python public_shell/task_ledger.py migrate-v3-to-v4 --database [DB_PATH] --backup [BACKUP_PATH]`。遷移先建立並驗證 v3 備份，再加入 nullable `arrived_at` 並升級為 v4；既有已完成任務不會被偽造抵達時間。
 

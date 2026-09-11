@@ -8,6 +8,10 @@
   let currentTask = null;
   let busy = false;
   let backend = "local";
+  let taskRefreshTimer = null;
+  const TASK_REFRESH_INTERVAL_MS = 15000;
+  const scheduleTimeout = typeof window.setTimeout === "function" ? window.setTimeout.bind(window) : null;
+  const cancelTimeout = typeof window.clearTimeout === "function" ? window.clearTimeout.bind(window) : null;
   const acceptButton = document.querySelector('[data-event="accept"]');
   const arriveButton = document.querySelector('[data-event="arrive"]');
   const reportButton = document.querySelector('[data-event="exception"]');
@@ -17,11 +21,42 @@
     message.textContent = text;
     message.classList.toggle("error", Boolean(error));
   }
+  function runtimeNotice(payload) {
+    if (backend === "cloud") return "雲端 AWS 任務帳本；連線失敗不轉寫本機。";
+    if (payload.source_mode === "LIVE_LOCAL_SANDBOX") return "LIVE 本機帳本；顯示已提交至本機任務帳本的狀態。";
+    if (payload.source_mode === "SEALED_DEMO_FIXTURE") return "離線本機帳本；此結果不代表 AWS 已同步。";
+    return "本機任務帳本；任務明細未提供來源模式。";
+  }
+  function serverExpiryMillis(task) {
+    if (typeof task.expires_at === "number" && Number.isFinite(task.expires_at)) {
+      return task.expires_at < 1000000000000 ? task.expires_at * 1000 : task.expires_at;
+    }
+    if (typeof task.expires_at === "string" && task.expires_at.trim()) {
+      const parsed = Date.parse(task.expires_at);
+      return Number.isFinite(parsed) ? parsed : null;
+    }
+    return null;
+  }
+  function scheduleTaskRefresh(task) {
+    if (taskRefreshTimer !== null && cancelTimeout) cancelTimeout(taskRefreshTimer);
+    taskRefreshTimer = null;
+    if (!scheduleTimeout || task.status !== "OPEN") return;
+    const expiryMillis = serverExpiryMillis(task);
+    const untilExpiry = expiryMillis === null ? TASK_REFRESH_INTERVAL_MS : expiryMillis - Date.now() + 250;
+    const delay = Math.max(1000, Math.min(TASK_REFRESH_INTERVAL_MS, untilExpiry));
+    taskRefreshTimer = scheduleTimeout(() => {
+      taskRefreshTimer = null;
+      loadTask().catch(() => {
+        showMessage("任務狀態更新失敗，將自動重試。", true);
+        if (currentTask) scheduleTaskRefresh(currentTask);
+      });
+    }, delay);
+  }
   function render(task) {
     currentTask = task;
     const badge = document.getElementById("status-badge");
-    const displayStatus = task.status === "COMPLETED" ? "COMPLETED" : task.arrived ? "ARRIVED" : task.accepted ? "ACCEPTED" : "OPEN";
-    badge.textContent = {OPEN: "待接單", ACCEPTED: "已接單", ARRIVED: "已抵達", COMPLETED: "已完成"}[displayStatus] || displayStatus;
+    const displayStatus = task.status === "EXPIRED" ? "EXPIRED" : task.status === "COMPLETED" ? "COMPLETED" : task.arrived ? "ARRIVED" : task.accepted ? "ACCEPTED" : "OPEN";
+    badge.textContent = {OPEN: "待接單", ACCEPTED: "已接單", ARRIVED: "已抵達", COMPLETED: "已完成", EXPIRED: "已失效"}[displayStatus] || displayStatus;
     badge.dataset.status = displayStatus;
     for (const [id, value] of Object.entries({
       "task-name": task.display_name, "task-district": task.district_id,
@@ -33,14 +68,16 @@
     arriveButton.disabled = unavailable || !task.accepted || task.arrived;
     button.disabled = unavailable || !task.arrived;
     reportButton.disabled = unavailable || !task.accepted;
-    document.getElementById("workflow-notice").textContent = task.status === "COMPLETED"
-      ? "任務已完成，帳本已留存完成事件。"
+    document.getElementById("workflow-notice").textContent = task.status === "EXPIRED"
+      ? "此任務逾時未接單，已自動失效；請回任務池取得新任務。"
+      : task.status === "COMPLETED"
+        ? "任務已完成，帳本已留存完成事件。"
       : task.arrived
         ? "已抵達現場。完成實際作業後才能確認任務完成；異常仍只寫入稽核紀錄。"
         : task.accepted
           ? "已接單。抵達現場後請先確認到站，或回報執行異常。"
           : "請先接單，抵達現場後確認到站，再完成任務。";
-    if (task.status === "COMPLETED") document.getElementById("task-qr").hidden = true;
+    document.getElementById("task-qr").hidden = ["COMPLETED", "EXPIRED"].includes(task.status);
   }
   async function loadTask() {
     if (!/^task-[a-z0-9][a-z0-9-]{3,64}$/.test(taskId)) throw new Error("task_id 格式錯誤");
@@ -56,10 +93,14 @@
           !completionURL.pathname.endsWith("/tasks/" + encodeURIComponent(taskId)) || !completionURL.hash) {
         throw new Error("任務網址格式不符合要求");
       }
-      if (!grant) grant = new URLSearchParams(completionURL.hash.slice(1));
+      if (!grant || Number(grant.get("expires_at")) <= Date.now() / 1000) {
+        grant = new URLSearchParams(completionURL.hash.slice(1));
+      }
     }
-    document.getElementById("runtime-notice").textContent = backend === "cloud" ? "雲端 AWS 任務帳本；連線失敗不轉寫本機。" : "目前為離線本機任務帳本；此結果不代表 AWS 已同步。";
+    if (payload.task.status === "EXPIRED") grant = null;
+    document.getElementById("runtime-notice").textContent = runtimeNotice(payload);
     render(payload.task);
+    scheduleTaskRefresh(payload.task);
     if (grant && completionURL && payload.task.status === "OPEN") {
       document.getElementById("task-link").href = completionURL.href;
       document.getElementById("task-qr").src = taskPath + "/qr.svg";
@@ -95,7 +136,14 @@
     button.disabled = true;
     reportButton.disabled = true;
     try {
-      if (!pendingEvent || pendingEvent.event_type !== eventType) pendingEvent = await createEvent(eventType);
+      if (pendingEvent && pendingEvent.event_type !== eventType) {
+        throw new Error("上一個操作結果尚未確認，請先重試原操作或重新載入任務。");
+      }
+      if (!grant || Number(grant.get("expires_at")) <= Date.now() / 1000) {
+        grant = null;
+        await loadTask();
+      }
+      if (!pendingEvent) pendingEvent = await createEvent(eventType);
       const response = await fetch(taskPath + "/events", {
         method: "POST", cache: "no-store", headers: {"Content-Type": "application/json"},
         body: JSON.stringify(pendingEvent)
@@ -106,10 +154,18 @@
           task_not_accepted: "請先接單，再執行下一步。",
           task_not_arrived: "請先確認抵達，再完成任務。",
           task_already_completed: "這筆任務已完成。",
+          task_expired: "此任務逾時未接單，已失效。",
+          event_time_invalid: "操作時間已逾期，任務已重新載入，請再按一次。",
           event_id_conflict: "這次操作與既有事件衝突，請重新載入任務。",
-          signature_invalid: "任務連結已失效，請重新掃描 QR Code。"
+          signature_invalid: "任務連結已失效，請重新掃描 QR Code。",
+          signature_invalid_or_expired: "任務連結已失效，請重新掃描 QR Code。"
         };
-        throw new Error(messages[payload.error] || "事件送出失敗，請稍後重試。");
+        const failure = new Error(messages[payload.error] || "事件送出失敗，請稍後重試。");
+        if (response.status >= 400 && response.status < 500 && ![408, 429].includes(response.status)) {
+          pendingEvent = null;
+          failure.reloadTask = true;
+        }
+        throw failure;
       }
       render(payload.task);
       showMessage(
@@ -122,8 +178,11 @@
               : payload.duplicate ? "此完成事件已處理，未重複更新。" : "任務已完成（" + (backend === "cloud" ? "AWS 帳本" : "本機帳本") + "）。",
         false
       );
-      if (payload.audit_only) pendingEvent = null;
+      pendingEvent = null;
     } catch (error) {
+      if (error.reloadTask) {
+        await loadTask().catch(() => {});
+      }
       showMessage(error.message || "連線中斷，可重試同一筆事件。", true);
     } finally {
       busy = false;

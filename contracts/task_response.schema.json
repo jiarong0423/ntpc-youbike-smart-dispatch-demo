@@ -75,7 +75,8 @@
       "type": "string",
       "enum": [
         "OPEN",
-        "COMPLETED"
+        "COMPLETED",
+        "EXPIRED"
       ]
     },
     "accepted": {
@@ -89,6 +90,10 @@
       "type": "boolean"
     },
     "arrived_at": {
+      "type": ["string", "null"],
+      "format": "date-time"
+    },
+    "expires_at": {
       "type": ["string", "null"],
       "format": "date-time"
     },

@@ -1,6 +1,6 @@
 # Threat Model
 
-Reviewed 2026-09-11 for the public manifest candidate generated at `2026-09-11T07:20:00+00:00`.
+Reviewed 2026-09-11 for the public candidate identified by the accompanying manifest hashes.
 
 ## Assets
 
@@ -9,7 +9,7 @@ Reviewed 2026-09-11 for the public manifest candidate generated at `2026-09-11T0
 - Black-box bearer credential and AWS session
 - Public task state and availability during the live demo
 
-## Trust Boundaries
+## Trust Boundary
 
 - Browser to same-origin public BFF
 - Public BFF to loopback-only private black-box API
@@ -18,11 +18,16 @@ Reviewed 2026-09-11 for the public manifest candidate generated at `2026-09-11T0
 - Public BFF to AWS CLI credential export and target API Gateway in the pending cloud path
 - DynamoDB authority to the pending Google Sheets observation mirror
 
+## Data Flow
+
+The browser reads only sanitized results from the same-origin BFF. The BFF validates the loopback response, commits task seeding, and then publishes the matching result generation. GET requests read the committed generation without reseeding. A failed refresh cannot renew its freshness deadline. Signed task events update the external local ledger; raw source snapshots and private calculations stay behind the private service. The pending cloud path sends only contracted task events and reduced summaries.
+
 ## Threats And Controls
 
 | Threat | Direct cause | Root cause | Control |
 | --- | --- | --- | --- |
 | Browser credential exposure | Credential enters JavaScript or HTML | Client calls private API directly | BFF owns credential; browser uses same-origin routes only |
+| Black-box credential redirect | A loopback endpoint redirects a request carrying the bearer credential | Default HTTP redirect behavior is used after validating only the initial URL | Black-box POST and health probes reject every redirect; the bearer credential is sent only to the validated loopback evaluate endpoint |
 | Algorithm disclosure | Private source, binary or formulas enter Git | Public and private trees are mixed | Exact export manifest and private black-box interface |
 | Raw data or personal data release | Snapshots or runtime DB enter package | Broad recursive copy or Git staging | Allowlisted export, Git ignores and explicit privacy scan |
 | Stale result shown as realtime | Automatic fallback after black-box failure | Availability prioritized over provenance | Live mode fails closed; offline mode is explicit |

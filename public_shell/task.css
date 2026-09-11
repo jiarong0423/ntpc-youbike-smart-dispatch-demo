@@ -21,6 +21,7 @@ h1 { font-size: 30px; }
 #status-badge[data-status="COMPLETED"] { color: #147253; background: #eaf7f1; }
 #status-badge[data-status="ACCEPTED"] { color: #735c0f; background: #fff8c5; }
 #status-badge[data-status="ARRIVED"] { color: #2454a6; background: #eaf1ff; }
+#status-badge[data-status="EXPIRED"] { color: var(--danger); background: #fff0ed; border-color: #f1b7ae; }
 #status-badge[data-status="exception"] { color: var(--danger); background: #fff0ed; }
 .task-layout { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 16px; margin-top: 18px; }
 .task-detail, .qr-panel { border: 1px solid var(--line); border-radius: 8px; background: var(--surface); padding: 18px; }

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+from copy import deepcopy
 from datetime import datetime, timezone
 import hashlib
 from http import HTTPStatus
@@ -14,7 +15,10 @@ import os
 from pathlib import Path
 import re
 import secrets
+import sqlite3
 import stat
+import threading
+import time
 from typing import Any
 from urllib import error, parse, request
 
@@ -29,6 +33,7 @@ DEFAULT_BLACKBOX_URL = "http://127.0.0.1:8781/api/v1/dispatch/evaluate"
 MAX_BODY_BYTES = 16 * 1024
 MAX_LIVE_RESULT_AGE_SECONDS = 30 * 60
 MAX_FUTURE_SKEW_SECONDS = 5 * 60
+MAX_COMMITTED_RESULT_AGE_SECONDS = 90
 CONTRACT_DIR = PROJECT_ROOT / "contracts"
 SEALED_RESULT_SCHEMA = json.loads(
     (CONTRACT_DIR / "sealed_result.schema.json").read_text(encoding="utf-8")
@@ -301,10 +306,11 @@ def fetch_blackbox_result(
     credential_file: Path,
     timeout_seconds: float,
 ) -> dict[str, Any]:
+    validated_url = validate_blackbox_url(url)
     token = read_credential(credential_file)
     body = build_request()
     outbound = request.Request(
-        validate_blackbox_url(url),
+        validated_url,
         data=canonical_json(body),
         headers={
             "Accept": "application/json",
@@ -313,7 +319,7 @@ def fetch_blackbox_result(
         },
         method="POST",
     )
-    with request.urlopen(
+    with request.build_opener(NoSignedRedirect()).open(
         outbound,
         timeout=timeout_seconds,
     ) as response:
@@ -348,7 +354,7 @@ def probe_blackbox_health(
         headers={"Accept": "application/json"},
         method="GET",
     )
-    with request.urlopen(
+    with request.build_opener(NoSignedRedirect()).open(
         outbound,
         timeout=timeout_seconds,
     ) as response:
@@ -551,32 +557,18 @@ class GatewayHandler(SimpleHTTPRequestHandler):
         self.wfile.write(body)
 
     def load_result(self) -> dict[str, Any]:
-        fixture = self.server.offline_fixture  # type: ignore[attr-defined]
-        if fixture:
-            return validate_sealed_result(
-                json.loads(
-                    Path(fixture).read_text(encoding="utf-8")
-                )
-            )
-        credential_value = os.environ.get(
-            "YOUBIKE_BLACKBOX_CREDENTIAL_FILE",
-            "",
-        )
-        if not credential_value:
-            raise ValueError("blackbox_not_configured")
-        return fetch_blackbox_result(
-            os.environ.get(
-                "YOUBIKE_BLACKBOX_URL",
-                DEFAULT_BLACKBOX_URL,
-            ),
-            Path(credential_value),
-            float(
-                os.environ.get(
-                    "YOUBIKE_BLACKBOX_TIMEOUT_SECONDS",
-                    "5",
-                )
-            ),
-        )
+        with self.server.committed_result_lock:  # type: ignore[attr-defined]
+            state = self.server.committed_result_state  # type: ignore[attr-defined]
+            result = state["result"]
+            age = time.monotonic() - state["committed_at"]
+            if result is None:
+                raise RuntimeError("committed_result_unavailable")
+            if (
+                not self.server.offline_fixture  # type: ignore[attr-defined]
+                and age > MAX_COMMITTED_RESULT_AGE_SECONDS
+            ):
+                raise RuntimeError("committed_result_stale")
+            return deepcopy(result)
 
     def end_headers(self) -> None:
         self.send_header("Cache-Control", "no-store")
@@ -643,6 +635,7 @@ class GatewayHandler(SimpleHTTPRequestHandler):
                     },
                 )
             try:
+                committed_result = self.load_result()
                 payload = probe_blackbox_health(
                     os.environ.get(
                         "YOUBIKE_BLACKBOX_URL",
@@ -670,6 +663,9 @@ class GatewayHandler(SimpleHTTPRequestHandler):
                         "error": "blackbox_unavailable",
                     },
                 )
+            payload["committed_result_generated_at"] = (
+                committed_result["generated_at"]
+            )
             return self.send_json(
                 HTTPStatus.OK,
                 payload,
@@ -681,7 +677,6 @@ class GatewayHandler(SimpleHTTPRequestHandler):
         ):
             try:
                 result = self.load_result()
-                self.task_store.seed_result(result)
             except CloudUnavailable:
                 raise
             except (
@@ -743,12 +738,24 @@ class GatewayHandler(SimpleHTTPRequestHandler):
                         "error": "task_not_found",
                     },
                 )
+            source_mode = None
+            try:
+                source_mode = self.load_result()["runtime_mode"]
+            except (
+                OSError,
+                ValueError,
+                RuntimeError,
+                error.URLError,
+                json.JSONDecodeError,
+            ):
+                pass
             return self.send_json(
                 HTTPStatus.OK,
                 {
                     "ok": True,
                     "task": task,
                     "task_backend": self.server.task_backend,
+                    "source_mode": source_mode,
                     "completion_url": self.completion_link(parts[3]) if task["status"] == "OPEN" else None,
                 },
             )
@@ -995,8 +1002,9 @@ def main() -> int:
         if args.offline_fixture
         else None
     )
+    fixture_result = None
     if fixture:
-        validate_sealed_result(
+        fixture_result = validate_sealed_result(
             json.loads(
                 fixture.read_text(encoding="utf-8")
             )
@@ -1011,8 +1019,62 @@ def main() -> int:
         )
     else:
         task_store = TaskStore(args.task_db, PROJECT_ROOT)
-        if fixture:
-            task_store.seed_result(validate_sealed_result(json.loads(fixture.read_text(encoding="utf-8"))))
+        if fixture_result:
+            task_store.seed_result(fixture_result)
+
+    committed_result_lock = threading.Lock()
+    committed_result_state = {
+        "result": deepcopy(fixture_result),
+        "committed_at": time.monotonic() if fixture_result else 0.0,
+    }
+    task_sync_stop = threading.Event()
+    task_sync_thread = None
+    if not fixture:
+        def sync_live_tasks() -> None:
+            while not task_sync_stop.is_set():
+                try:
+                    credential_value = os.environ.get(
+                        "YOUBIKE_BLACKBOX_CREDENTIAL_FILE",
+                        "",
+                    )
+                    if not credential_value:
+                        raise ValueError("blackbox_not_configured")
+                    result = fetch_blackbox_result(
+                        os.environ.get(
+                            "YOUBIKE_BLACKBOX_URL",
+                            DEFAULT_BLACKBOX_URL,
+                        ),
+                        Path(credential_value),
+                        float(
+                            os.environ.get(
+                                "YOUBIKE_BLACKBOX_TIMEOUT_SECONDS",
+                                "5",
+                            )
+                        ),
+                    )
+                    count = task_store.seed_result(result)
+                    with committed_result_lock:
+                        committed_result_state["result"] = deepcopy(result)
+                        committed_result_state["committed_at"] = time.monotonic()
+                    print(f"task_sync status=ok count={count}")
+                except (
+                    CloudUnavailable,
+                    sqlite3.Error,
+                    OSError,
+                    ValueError,
+                    RuntimeError,
+                    error.URLError,
+                    json.JSONDecodeError,
+                ):
+                    print("task_sync status=degraded")
+                task_sync_stop.wait(30)
+
+        task_sync_thread = threading.Thread(
+            target=sync_live_tasks,
+            name="task-result-sync",
+            daemon=True,
+        )
+
     handler = (
         lambda *handler_args, **handler_kwargs:
         GatewayHandler(
@@ -1031,6 +1093,10 @@ def main() -> int:
         args.public_base_url.rstrip("/")
     )
     server.offline_fixture = fixture  # type: ignore[attr-defined]
+    server.committed_result_lock = committed_result_lock  # type: ignore[attr-defined]
+    server.committed_result_state = committed_result_state  # type: ignore[attr-defined]
+    if task_sync_thread:
+        task_sync_thread.start()
     mode = (
         "offline_explicit"
         if fixture
@@ -1047,6 +1113,9 @@ def main() -> int:
     except KeyboardInterrupt:
         pass
     finally:
+        task_sync_stop.set()
+        if task_sync_thread:
+            task_sync_thread.join(timeout=6)
         server.server_close()
     return 0
 

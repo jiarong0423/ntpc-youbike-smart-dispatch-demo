@@ -6,7 +6,7 @@ from __future__ import annotations
 import argparse
 import base64
 from contextlib import closing
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from http import HTTPStatus
 from pathlib import Path
 import hashlib
@@ -126,7 +126,41 @@ class TaskStore:
             conn.commit()
 
     @staticmethod
-    def public_task(row: sqlite3.Row) -> dict[str, Any]:
+    def _expires_at(row: sqlite3.Row) -> datetime:
+        try:
+            updated = datetime.fromisoformat(
+                str(row["updated_at"]).replace("Z", "+00:00")
+            )
+            if updated.tzinfo is None:
+                raise ValueError("task_updated_at_timezone_missing")
+            return updated.astimezone(timezone.utc) + timedelta(
+                seconds=QR_TTL_SECONDS
+            )
+        except (TypeError, ValueError):
+            return datetime.fromtimestamp(0, timezone.utc)
+
+    @classmethod
+    def public_task(
+        cls,
+        row: sqlite3.Row,
+        *,
+        now: float | None = None,
+    ) -> dict[str, Any]:
+        current = time.time() if now is None else now
+        status = row["status"]
+        expiry = cls._expires_at(row)
+        expires_at = (
+            expiry.isoformat(timespec="seconds")
+            if status == "OPEN" and row["accepted_at"] is None
+            else None
+        )
+        if (
+            status == "OPEN"
+            and row["accepted_at"] is None
+            and current >= expiry.timestamp()
+        ):
+            status = "EXPIRED"
+            expires_at = None
         return {
             "task_id": row["task_id"],
             "case_id": row["case_id"],
@@ -136,12 +170,13 @@ class TaskStore:
             "priority_band": row["priority_band"],
             "route_label": row["route_label"],
             "eta_band": row["eta_band"],
-            "status": row["status"],
+            "status": status,
             "accepted": row["accepted_at"] is not None,
             "accepted_at": row["accepted_at"],
             "arrived": row["arrived_at"] is not None,
             "arrived_at": row["arrived_at"],
             "task_type": row["action_label"],
+            "expires_at": expires_at,
             "updated_at": row["updated_at"],
         }
 
@@ -188,9 +223,15 @@ class TaskStore:
                     priority_band=excluded.priority_band,
                     route_label=excluded.route_label,
                     eta_band=excluded.eta_band,
-                    source_package_id=excluded.source_package_id,
-                    updated_at=excluded.updated_at
+                    updated_at=CASE
+                        WHEN task.source_package_id <> excluded.source_package_id
+                        THEN excluded.updated_at
+                        ELSE task.updated_at
+                    END,
+                    source_package_id=excluded.source_package_id
                 WHERE task.status = 'OPEN'
+                  AND task.accepted_at IS NULL
+                  AND task.arrived_at IS NULL
                 """,
                 rows,
             )
@@ -241,6 +282,64 @@ class TaskStore:
         except (ValueError, KeyError, TypeError):
             return False
 
+    def _expire_open_row(
+        self,
+        conn: sqlite3.Connection,
+        row: sqlite3.Row,
+        *,
+        now: float,
+        timestamp: str,
+    ) -> sqlite3.Row:
+        if (
+            row["status"] != "OPEN"
+            or row["accepted_at"] is not None
+            or now < self._expires_at(row).timestamp()
+        ):
+            return row
+        basis = f"{row['task_id']}|{row['updated_at']}"
+        event_id = (
+            "evt-expire-"
+            + hashlib.sha256(basis.encode()).hexdigest()[:32]
+        )
+        request_hash = hashlib.sha256(
+            canonical(
+                {
+                    "task_id": row["task_id"],
+                    "event_type": "expire",
+                    "expired_from": row["updated_at"],
+                }
+            )
+        ).hexdigest()
+        changed = conn.execute(
+            """
+            UPDATE task
+            SET status='EXPIRED', updated_at=?
+            WHERE task_id=?
+              AND status='OPEN'
+              AND accepted_at IS NULL
+              AND arrived_at IS NULL
+              AND updated_at=?
+            """,
+            (timestamp, row["task_id"], row["updated_at"]),
+        )
+        if changed.rowcount == 1:
+            conn.execute(
+                "INSERT OR IGNORE INTO task_event VALUES (?,?,?,?,?,?,?)",
+                (
+                    event_id,
+                    row["task_id"],
+                    "expire",
+                    request_hash,
+                    "OPEN",
+                    "EXPIRED",
+                    timestamp,
+                ),
+            )
+        return conn.execute(
+            "SELECT * FROM task WHERE task_id=?",
+            (row["task_id"],),
+        ).fetchone()
+
     def reject(self, task_id: str, event_id: Any, error: str, status: int = 400,
                *, conn: sqlite3.Connection | None = None) -> tuple[int, dict[str, Any]]:
         values = (task_id if TASK_ID_RE.fullmatch(task_id) else None,
@@ -269,6 +368,33 @@ class TaskStore:
                 or not re.fullmatch(r"[a-f0-9]{64}", payload["device_hash"])
                 or len(payload["signature"]) > 1024):
             return self.reject(task_id, event_id, "event_value_invalid")
+        request_hash = hashlib.sha256(canonical(payload)).hexdigest()
+        with closing(self.connect()) as conn:
+            existing = conn.execute(
+                "SELECT * FROM task_event WHERE event_id=?",
+                (event_id,),
+            ).fetchone()
+            if existing:
+                row = conn.execute(
+                    "SELECT * FROM task WHERE task_id=?",
+                    (existing["task_id"],),
+                ).fetchone()
+                if (
+                    existing["task_id"] != task_id
+                    or existing["request_hash"] != request_hash
+                ):
+                    return self.reject(
+                        task_id,
+                        event_id,
+                        "event_id_conflict",
+                        409,
+                    )
+                return 200, {
+                    "ok": True,
+                    "duplicate": True,
+                    "audit_only": existing["event_type"] == "exception",
+                    "task": self.public_task(row),
+                }
         now = time.time()
         try:
             occurred = datetime.fromisoformat(payload["occurred_at"].replace("Z", "+00:00"))
@@ -279,17 +405,28 @@ class TaskStore:
                 raise ValueError("time_out_of_range")
         except (ValueError, OverflowError):
             return self.reject(task_id, event_id, "event_time_invalid")
-        if not self._verify_signature(payload["signature"], task_id, payload["task_type"], now, payload["device_hash"]):
-            return self.reject(task_id, event_id, "signature_invalid_or_expired", 403)
-        request_hash = hashlib.sha256(canonical(payload)).hexdigest()
         timestamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
         with closing(self.connect()) as conn:
             conn.execute("BEGIN IMMEDIATE")
-            if not self._verify_signature(payload["signature"], task_id, payload["task_type"], time.time(), payload["device_hash"]):
-                return self.reject(task_id, event_id, "signature_invalid_or_expired", 403, conn=conn)
             row = conn.execute("SELECT * FROM task WHERE task_id=?", (task_id,)).fetchone()
             if not row:
                 return self.reject(task_id, event_id, "task_not_found", 404, conn=conn)
+            row = self._expire_open_row(
+                conn,
+                row,
+                now=time.time(),
+                timestamp=timestamp,
+            )
+            if row["status"] == "EXPIRED":
+                return self.reject(
+                    task_id,
+                    event_id,
+                    "task_expired",
+                    410,
+                    conn=conn,
+                )
+            if not self._verify_signature(payload["signature"], task_id, payload["task_type"], time.time(), payload["device_hash"]):
+                return self.reject(task_id, event_id, "signature_invalid_or_expired", 403, conn=conn)
             if row["action_label"] != payload["task_type"]:
                 return self.reject(task_id, event_id, "task_type_mismatch", 409, conn=conn)
             existing = conn.execute("SELECT * FROM task_event WHERE event_id=?", (event_id,)).fetchone()

@@ -22,6 +22,7 @@
 - Live mode fails closed when the black-box service is unavailable.
 - Offline fixture use is an explicit server option.
 - Credentials must be outside the repository and never reach the browser.
+- Black-box HTTP requests reject redirects so bearer credentials cannot leave the validated loopback endpoint.
 - Task event fields use strict allowlists and short-lived salted random device hashes.
 - Event IDs are idempotency keys; the server enforces accept → arrive → complete and rejects skipped or reordered transitions. Exception events are audit-only.
 - Bedrock payloads are schema validated and reject station, coordinate, identity and algorithm fields.

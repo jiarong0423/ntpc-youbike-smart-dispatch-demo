@@ -6,11 +6,13 @@
 flowchart LR
   subgraph LOCAL["Windows private boundary"]
     INPUT["History, snapshots and weather"] --> ENGINE["Private black box / loopback only"]
-    ENGINE -->|"Sanitized contract"| BFF["Public BFF"]
-    FIXTURE["Explicit offline fixture / not realtime"] --> BFF
+    ENGINE -->|"Validated sanitized contract"| SYNC["Single-writer sync"]
+    FIXTURE["Explicit offline fixture / not realtime"] --> SYNC
+    SYNC -->|"1. Seed result-derived tasks"| MODE{"TASK_BACKEND"}
+    SYNC -->|"2. Publish committed regional snapshot"| BFF["Public BFF"]
     BFF --> UI["Dispatch workspace"]
-    BFF --> MODE{"TASK_BACKEND"}
-    MODE -->|"local only"| SQLITE["SQLite outside repo / accepted_at + arrived_at / OPEN to COMPLETED"]
+    BFF --> MODE
+    MODE -->|"local only"| SQLITE["SQLite outside repo / OPEN, EXPIRED or COMPLETED"]
     SQLITE --> LANQR["Detected or explicit LAN IPv4 /tasks/id"]
   end
   subgraph CLOUD["AWS target / deployment verification required"]
@@ -30,7 +32,9 @@ flowchart LR
 
 These boundaries describe the local implementation and the proposed deployment target. Actual AWS deployment, cloud authentication, target Windows device and cellular QR acceptance require independent evidence. Sheets mirroring and Bedrock explanation are separate pending integrations. Local completion is never evidence of AWS confirmation.
 
-The local public application implements the accept-to-arrive-to-complete state machine. `accepted_at` and `arrived_at` record separate transitions while `status` remains `OPEN` until completion. Exception events remain audit-only and do not advance either transition. The private engine supplies only contract-bound results and does not send formulas, weights, exact scores or source databases to the browser.
+The local public application implements the accept-to-arrive-to-complete state machine. `accepted_at` and `arrived_at` record separate transitions while `status` remains `OPEN` until completion. An unaccepted task becomes `EXPIRED` after five minutes; an accepted task is protected from expiry and later result seeding. Exception events remain audit-only and do not advance either transition. The private engine supplies only contract-bound results and does not send formulas, weights, exact scores or source databases to the browser.
+
+Live result retrieval is single-writer and read-only from the browser perspective. The background synchronizer validates one black-box generation, seeds its derived tasks, and only then publishes the same generation as the committed regional snapshot. Browser GET requests never seed tasks or fetch a newer generation. A missing snapshot or a live committed snapshot older than 90 seconds fails closed. The AWS task-seeding endpoint still requires an independently verified atomic batch contract before cloud deployment can claim the same all-or-nothing guarantee.
 
 ## Dispatch Vehicle Policy
 

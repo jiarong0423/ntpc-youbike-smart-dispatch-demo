@@ -3,12 +3,14 @@ from __future__ import annotations
 from copy import deepcopy
 import hashlib
 from datetime import datetime, timedelta, timezone
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 from pathlib import Path
 import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from urllib import error, parse, request
@@ -26,6 +28,7 @@ from aws_task_client import IsolatedTaskSigner, signed_request, NoSignedRedirect
 
 from serve_public_blackbox_gateway import (
     canonical_json,
+    fetch_blackbox_result,
     validate_blackbox_response,
     validate_blackbox_url,
     validate_future_timestamp,
@@ -113,6 +116,13 @@ class PublicGatewayTests(unittest.TestCase):
         tasks = self.get_json("/api/handoff/tasks")["tasks"]
         self.assertEqual(6, len(tasks))
         task_id = tasks[0]["task_id"]
+        self.assertIsNotNone(tasks[0]["expires_at"])
+        detail = self.get_json("/api/handoff/tasks/" + task_id)
+        self.assertEqual("SEALED_DEMO_FIXTURE", detail["source_mode"])
+        self.assertEqual(
+            tasks[0]["expires_at"],
+            detail["task"]["expires_at"],
+        )
         with request.urlopen(
             self.base
             + "/api/handoff/tasks/"
@@ -123,6 +133,20 @@ class PublicGatewayTests(unittest.TestCase):
             body = response.read()
         self.assertIn(b"<svg", body)
         self.assertNotIn(b"127.0.0.1:8781", body)
+
+    def test_blackbox_result_get_is_read_only(self) -> None:
+        database = Path(self.temp.name) / "task.sqlite3"
+        with closing(sqlite3.connect(database)) as conn:
+            before = conn.execute(
+                "SELECT task_id,status,accepted_at,arrived_at,updated_at FROM task ORDER BY task_id"
+            ).fetchall()
+        self.get_json("/api/blackbox/result")
+        self.get_json("/api/blackbox/result")
+        with closing(sqlite3.connect(database)) as conn:
+            after = conn.execute(
+                "SELECT task_id,status,accepted_at,arrived_at,updated_at FROM task ORDER BY task_id"
+            ).fetchall()
+        self.assertEqual(before, after)
 
     def test_signed_completion_contract_over_http(self) -> None:
         task = self.get_json("/api/handoff/tasks")["tasks"][0]
@@ -148,6 +172,7 @@ class PublicGatewayTests(unittest.TestCase):
         self.assertTrue(accepted["task"]["accepted"])
         self.assertFalse(accepted["task"]["arrived"])
         self.assertEqual("OPEN", accepted["task"]["status"])
+        self.assertIsNone(accepted["task"]["expires_at"])
         arrive_payload = {**payload, "event_id": "evt-http-arrival-0001", "event_type": "arrive"}
         Draft202012Validator(event_schema, format_checker=FormatChecker()).validate(arrive_payload)
         req = request.Request(self.base + path + "/events", data=canonical_json(arrive_payload),
@@ -249,6 +274,98 @@ class PublicGatewayTests(unittest.TestCase):
                 ):
                     validate_blackbox_url(value)
 
+    def test_invalid_blackbox_target_is_rejected_before_credential_read(self) -> None:
+        with patch(
+            "serve_public_blackbox_gateway.read_credential"
+        ) as credential_reader:
+            with self.assertRaisesRegex(
+                ValueError,
+                "blackbox_url_requires_loopback_endpoint",
+            ):
+                fetch_blackbox_result(
+                    "https://example.test/api/v1/dispatch/evaluate",
+                    Path("credential-not-read"),
+                    1,
+                )
+        credential_reader.assert_not_called()
+
+    def test_blackbox_redirect_never_forwards_bearer_token(self) -> None:
+        received_authorization: list[str | None] = []
+
+        class CaptureHandler(BaseHTTPRequestHandler):
+            def do_GET(self) -> None:
+                received_authorization.append(
+                    self.headers.get("Authorization")
+                )
+                self.send_response(200)
+                self.end_headers()
+
+            def do_POST(self) -> None:
+                self.do_GET()
+
+            def log_message(self, *_args: object) -> None:
+                return
+
+        capture = ThreadingHTTPServer(
+            ("127.0.0.1", 0),
+            CaptureHandler,
+        )
+        capture_url = (
+            f"http://127.0.0.1:{capture.server_port}/capture"
+        )
+
+        class RedirectHandler(BaseHTTPRequestHandler):
+            def do_POST(self) -> None:
+                self.send_response(302)
+                self.send_header("Location", capture_url)
+                self.end_headers()
+
+            def log_message(self, *_args: object) -> None:
+                return
+
+        redirect = ThreadingHTTPServer(
+            ("127.0.0.1", 0),
+            RedirectHandler,
+        )
+        workers = [
+            threading.Thread(
+                target=capture.serve_forever,
+                daemon=True,
+            ),
+            threading.Thread(
+                target=redirect.serve_forever,
+                daemon=True,
+            ),
+        ]
+        for worker in workers:
+            worker.start()
+        credential = Path(self.temp.name) / "blackbox.token"
+        credential.write_text(
+            "ybx_v1_" + "a" * 64,
+            encoding="utf-8",
+        )
+        credential.chmod(0o600)
+        try:
+            with self.assertRaises(error.HTTPError) as blocked:
+                fetch_blackbox_result(
+                    (
+                        "http://127.0.0.1:"
+                        f"{redirect.server_port}"
+                        "/api/v1/dispatch/evaluate"
+                    ),
+                    credential,
+                    2,
+                )
+            self.assertEqual(302, blocked.exception.code)
+            self.assertEqual([], received_authorization)
+        finally:
+            redirect.shutdown()
+            capture.shutdown()
+            redirect.server_close()
+            capture.server_close()
+            for worker in workers:
+                worker.join(timeout=2)
+
     def test_cloud_process_never_creates_sqlite_on_failure(self) -> None:
         cloud_port = free_port()
         forbidden_db = Path(self.temp.name) / "must-not-exist.sqlite3"
@@ -267,13 +384,21 @@ class PublicGatewayTests(unittest.TestCase):
                     break
                 except error.URLError:
                     time.sleep(.05)
-            for path in ("/api/handoff/tasks", "/api/blackbox/result"):
-                with self.assertRaises(error.HTTPError) as unavailable:
-                    request.urlopen(f"http://127.0.0.1:{cloud_port}" + path, timeout=2)
-                self.assertEqual(503, unavailable.exception.code)
-                body = json.loads(unavailable.exception.read())
-                self.assertFalse(body["fallback"])
-                self.assertEqual("cloud", body["task_backend"])
+            with self.assertRaises(error.HTTPError) as unavailable:
+                request.urlopen(
+                    f"http://127.0.0.1:{cloud_port}/api/handoff/tasks",
+                    timeout=2,
+                )
+            self.assertEqual(503, unavailable.exception.code)
+            body = json.loads(unavailable.exception.read())
+            self.assertFalse(body["fallback"])
+            self.assertEqual("cloud", body["task_backend"])
+            with request.urlopen(
+                f"http://127.0.0.1:{cloud_port}/api/blackbox/result",
+                timeout=2,
+            ) as response:
+                result = json.loads(response.read())
+            self.assertEqual("SEALED_DEMO_FIXTURE", result["runtime_mode"])
             self.assertFalse(forbidden_db.exists())
         finally:
             child.terminate()
@@ -661,6 +786,63 @@ vm.runInNewContext(source, context);
         )
         self.assertEqual(0, result.returncode, result.stderr)
 
+
+
+    @unittest.skipUnless(shutil.which("node"), "Node.js required for browser script harness")
+    def test_phone_expired_event_is_cleared_and_recreated(self) -> None:
+        script = r"""
+const fs = require('fs');
+const vm = require('vm');
+const source = fs.readFileSync(process.argv[1], 'utf8');
+const elements = new Map();
+function element(id) {
+  if (!elements.has(id)) elements.set(id, {disabled:true, hidden:false, textContent:'', dataset:{}, classList:{toggle(){}}, addEventListener(type, callback){this.listener=callback;}});
+  return elements.get(id);
+}
+const buttons = {
+  '[data-event="accept"]': element('accept'),
+  '[data-event="arrive"]': element('arrive'),
+  '[data-event="complete"]': element('complete'),
+  '[data-event="exception"]': element('exception')
+};
+let task = {task_id:'task-phone-demo',case_id:'case-phone-demo',display_name:'Phone demo',district_id:'ntpc-test',action_label:'observe',priority_band:'low',route_label:'route',eta_band:'none',status:'OPEN',accepted:true,accepted_at:'2026-09-11T00:01:00+00:00',arrived:false,arrived_at:null,updated_at:'2026-09-11T00:01:00+00:00',task_type:'observe'};
+const eventIds = [];
+let postCount = 0;
+let randomByte = 1;
+const cryptoObject = {getRandomValues(array){array.fill(randomByte++); return array;}};
+const grant = '#task_type=observe&device_hash=' + 'a'.repeat(64) + '&signature=grant.' + 'b'.repeat(64) + '&expires_at=4102444800';
+const context = {
+  URL, URLSearchParams, setImmediate,
+  crypto: cryptoObject,
+  window: {crypto: cryptoObject, confirm(){return true;}, location:{search:'',pathname:'/tasks/task-phone-demo',hash:grant}},
+  document: {querySelector(selector){return buttons[selector];}, getElementById(id){return element(id);}},
+  fetch: async (url, options={}) => {
+    if (!url.endsWith('/events')) return {ok:true,status:200,json:async()=>({ok:true,task,task_backend:'local',completion_url:'http://127.0.0.1:8084/tasks/task-phone-demo' + grant})};
+    const event = JSON.parse(options.body);
+    eventIds.push(event.event_id);
+    postCount += 1;
+    if (postCount === 1) return {ok:false,status:400,json:async()=>({ok:false,error:'event_time_invalid'})};
+    task = {...task,arrived:true,arrived_at:'2026-09-11T00:02:00+00:00'};
+    return {ok:true,status:200,json:async()=>({ok:true,task,duplicate:false,audit_only:false})};
+  }
+};
+vm.runInNewContext(source, context);
+(async()=>{
+  await new Promise(resolve=>setImmediate(resolve));
+  await buttons['[data-event="arrive"]'].listener();
+  if (!elements.get('message').textContent.includes('操作時間已逾期')) throw Error('expired event message missing');
+  await buttons['[data-event="arrive"]'].listener();
+  if (eventIds.length !== 2 || eventIds[0] === eventIds[1]) throw Error('stale event was reused');
+  if (!task.arrived || buttons['[data-event="complete"]'].disabled) throw Error('fresh retry did not advance task');
+})().catch(error=>{console.error(error.message);process.exit(1);});
+"""
+        result = subprocess.run(
+            [shutil.which("node"), "-e", script, str(ROOT / "public_shell/task.js")],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        self.assertEqual(0, result.returncode, result.stderr)
 
 if __name__ == "__main__":
     unittest.main()
