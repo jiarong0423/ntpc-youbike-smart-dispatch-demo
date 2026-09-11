@@ -17,10 +17,8 @@ from jsonschema import Draft202012Validator
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SCHEMA_PATH = PROJECT_ROOT / "contracts" / "bedrock_explainer.schema.json"
-DEFAULT_PROFILE = "youbike-hackathon"
 DEFAULT_REGION = "ap-southeast-2"
 DEFAULT_MODEL_ID = "global.amazon.nova-2-lite-v1:0"
-FORBIDDEN_PROFILE = "vibegate-dev"
 MAX_OUTPUT_TOKENS = 256
 CREDENTIAL_ENV = {
     "AWS_ACCESS_KEY_ID",
@@ -134,8 +132,8 @@ def isolated_environment(
     region: str,
     session_dir: Path,
 ) -> dict[str, str]:
-    if profile == FORBIDDEN_PROFILE:
-        raise ValueError("vibegate_profile_is_frozen")
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", profile):
+        raise ValueError("aws_profile_invalid")
     if any(os.environ.get(name) for name in CREDENTIAL_ENV):
         raise ValueError("ambient_aws_credentials_rejected")
     if any(os.environ.get(name) for name in DIRECT_VENDOR_ENV):
@@ -224,7 +222,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--profile",
-        default=DEFAULT_PROFILE,
+        required=True,
     )
     parser.add_argument(
         "--region",
@@ -334,16 +332,17 @@ def main() -> int:
             },
         )
 
-    passed = (
+    inference_succeeded = (
+        called
+        and return_code == 0
+        and bool(assistant_text)
+    )
+    run_succeeded = (
         not args.allow_paid_inference
-        or (
-            called
-            and return_code == 0
-            and bool(assistant_text)
-        )
+        or inference_succeeded
     )
     summary = {
-        "schema_version": "youbike.bedrock_explainer_smoke.v2",
+        "schema_version": "youbike.bedrock_explainer_run.v2",
         "created_at": dt.datetime.now(
             dt.timezone.utc
         ).isoformat(),
@@ -352,7 +351,7 @@ def main() -> int:
             if args.allow_paid_inference
             else "prepare_only"
         ),
-        "profile": args.profile,
+        "profile_configured": True,
         "region": args.region,
         "model_id": args.model_id,
         "bedrock_called": called,
@@ -369,7 +368,8 @@ def main() -> int:
             "algorithm_sent": False,
             "cloud_resource_mutation": False,
         },
-        "passed": passed,
+        "preparation_valid": True,
+        "inference_succeeded": inference_succeeded,
     }
     write_json(
         summary_path,
@@ -383,7 +383,7 @@ def main() -> int:
             sort_keys=True,
         )
     )
-    return 0 if passed else 2
+    return 0 if run_succeeded else 2
 
 
 if __name__ == "__main__":

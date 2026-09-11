@@ -38,7 +38,7 @@ if not exist "%VENV_DIR%\Scripts\python.exe" (
 )
 "%VENV_DIR%\Scripts\python.exe" -c "import sys; raise SystemExit(0 if (3, 11) <= sys.version_info[:2] <= (3, 13) else 1)" >nul 2>&1
 if errorlevel 1 (
-  echo Existing runtime is not Python 3.11, 3.12 or 3.13. Remove %VENV_DIR% and run again.
+  echo Existing runtime is not Python 3.11, 3.12 or 3.13. Recreate the external runtime directory and run again.
   exit /b 3
 )
 

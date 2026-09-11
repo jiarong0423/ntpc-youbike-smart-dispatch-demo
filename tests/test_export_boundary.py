@@ -154,7 +154,7 @@ class ExportBoundaryTests(unittest.TestCase):
         self.assertIn("1,606 站點維度", index)
         self.assertIn('id="lineage-mode"', index)
         self.assertIn('id="lineage-freshness"', index)
-        self.assertIn("固定 29 區安全轉換資料", readme)
+        self.assertIn("欄位縮減、區間化與時間位移處理的 29 區固定資料", readme)
         self.assertIn("區間化", historical)
         self.assertIn("時間錯位", historical)
         self.assertIn("不能還原單站或精確比例", historical)

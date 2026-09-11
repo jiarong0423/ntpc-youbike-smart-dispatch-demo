@@ -51,7 +51,7 @@ if /I "%MODE%"=="offline" set "SOURCE_ARGS=--offline-fixture fixtures\sealed.jso
 if /I "%MODE%"=="offline" goto source_ready
 if not defined YOUBIKE_BLACKBOX_CREDENTIAL_FILE set "YOUBIKE_BLACKBOX_CREDENTIAL_FILE=%CREDENTIAL_FILE%"
 if not exist "%YOUBIKE_BLACKBOX_CREDENTIAL_FILE%" (
-  echo Live mode requires the separate private venue package to issue a short-lived credential.
+  echo Live mode credential file is missing. Configure YOUBIKE_BLACKBOX_CREDENTIAL_FILE.
   exit /b 2
 )
 if not defined YOUBIKE_BLACKBOX_REGISTRY_DIR set "YOUBIKE_BLACKBOX_REGISTRY_DIR=%REGISTRY_DIR%"

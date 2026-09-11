@@ -24,6 +24,32 @@
       under_10m: "10 分內",
       under_20m: "20 分內",
       over_20m: "20 分以上"
+    },
+    sourceMode: {
+      LIVE_LOCAL_SANDBOX: "近期連線結果",
+      SEALED_DEMO_FIXTURE: "離線參考資料",
+      PORTABLE_SEALED_FALLBACK: "封裝備援資料"
+    },
+    taskBackend: {
+      local: "本機帳本",
+      cloud: "AWS 任務帳本"
+    },
+    dataClass: {
+      synthetic_fixture: "固定參考資料",
+      recent_private_result: "近期封裝結果"
+    },
+    publicClaim: {
+      poc_display: "流程展示"
+    },
+    algorithmVisibility: {
+      black_box: "決策來源已封裝"
+    },
+    calculationPolicy: {
+      display_only: "前端僅呈現結果"
+    },
+    health: {
+      ok: "可用",
+      degraded: "中斷"
     }
   };
 
@@ -88,7 +114,7 @@
   }
 
   function renderError(message) {
-    elements.modeBanner.textContent = "contract error";
+    elements.modeBanner.textContent = "資料格式錯誤";
     elements.districtList.innerHTML = "";
     elements.caseList.innerHTML = "";
     const districtError = document.createElement("div");
@@ -109,15 +135,15 @@
     setText(elements.metricWarning, summary.warning_count);
     setText(elements.metricStable, summary.stable_count);
     setText(elements.metricCases, summary.active_case_count);
-    setText(elements.boundaryText, `${boundary.algorithm_visibility || "-"} / ${boundary.frontend_calculation_policy || "-"}`);
+    setText(elements.boundaryText, `${label("algorithmVisibility", boundary.algorithm_visibility)} / ${label("calculationPolicy", boundary.frontend_calculation_policy)}`);
     setText(elements.operatorMessage, summary.operator_message);
-    setText(elements.scopeLabel, `${scope.city || "-"} · ${scope.public_claim || "-"}`);
-    setText(elements.caseLabel, `${payload.runtime_mode || "-"} · ${scope.data_class || "-"}`);
+    setText(elements.scopeLabel, `${scope.city || "-"} · ${label("publicClaim", scope.public_claim)}`);
+    setText(elements.caseLabel, `${label("sourceMode", payload.runtime_mode)} · ${label("dataClass", scope.data_class)}`);
     if (payload.runtime_mode === "LIVE_LOCAL_SANDBOX") {
       setText(elements.lineageMode, "近即時黑箱結果");
       setText(elements.lineageFreshness, `結果時間 ${payload.generated_at || "-"}；來源時間與 30 分鐘新鮮度已由 gateway 驗證。`);
     } else if (payload.runtime_mode === "SEALED_DEMO_FIXTURE") {
-      setText(elements.lineageMode, "離線固定安全轉換資料");
+      setText(elements.lineageMode, "離線固定參考資料");
       setText(elements.lineageFreshness, `固定資料版本時間 ${payload.generated_at || "-"}；非目前資料、非原始資料、非即時計算。`);
     } else {
       setText(elements.lineageMode, "封裝備援結果");
@@ -181,7 +207,8 @@
   function render(payload) {
     const errors = validatePayload(payload);
     if (errors.length > 0) {
-      renderError(errors.join("; "));
+      console.warn(errors.join("; "));
+      renderError("資料格式不符合顯示要求。");
       return;
     }
     renderSummary(payload);
@@ -199,7 +226,7 @@
 
   loadPayload("/api/integration/status").then(status => {
     const output = document.getElementById("integration-status");
-    if (output) output.textContent = "黑箱 " + status.health + " · " + status.source_mode + " · " + status.generated_at + " · " + status.districts.length + " 區 · 任務帳本 " + status.task_backend;
+    if (output) output.textContent = "資料來源 " + label("health", status.health) + " · " + label("sourceMode", status.source_mode) + " · " + status.generated_at + " · " + status.districts.length + " 區 · " + label("taskBackend", status.task_backend);
   }).catch(() => {
     const output = document.getElementById("integration-status");
     if (output) output.textContent = "黑箱降級：未取得有效結果，不產生新決策。";
@@ -212,19 +239,19 @@
         console.warn(error.message || "fixture load failed");
         renderError("離線固定資料載入失敗；未使用內嵌舊資料替代。");
         setText(elements.modeBanner, "離線資料不可用");
-        setText(elements.operatorMessage, "請檢查 fixtures/sealed.json 完整性後重試。");
-        setText(elements.caseLabel, "OFFLINE_FIXTURE_UNAVAILABLE · fail-closed");
+        setText(elements.operatorMessage, "請重新啟動服務後再試。");
+        setText(elements.caseLabel, "離線參考資料無法載入");
       });
   } else {
     loadPayload(liveResultPath)
       .then(render)
       .catch((error) => {
         console.warn(error.message || "blackbox load failed");
-        renderError("黑箱服務目前無法使用；系統未自動切換為封存資料。請修復連線，或由操作員明確使用 ?mode=offline。");
-        setText(elements.modeBanner, "黑箱服務中斷");
-        setText(elements.operatorMessage, "近即時連線採 fail-closed；畫面不會以舊資料冒充近期計算結果。");
-        setText(elements.caseLabel, "BLACKBOX_UNAVAILABLE · no automatic fallback");
-        setText(elements.lineageMode, "黑箱不可用");
+        renderError("資料來源目前無法使用；系統未自動切換為封存資料。請修復連線，或由操作員明確使用離線模式。");
+        setText(elements.modeBanner, "資料來源中斷");
+        setText(elements.operatorMessage, "目前不顯示新的調度建議，也不以舊資料代替近期結果。");
+        setText(elements.caseLabel, "近期資料無法載入");
+        setText(elements.lineageMode, "資料來源不可用");
         setText(elements.lineageFreshness, "未取得通過來源時間、新鮮度與契約檢查的結果。");
       });
   }

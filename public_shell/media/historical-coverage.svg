@@ -5,7 +5,7 @@ text{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans TC",sans
 </style>
 <text x="54" y="56" class="title">2026 年 1-9 月證據覆蓋</text>
 <text x="54" y="88" class="sub">公開備查固定版本：跨月快照先做區間化與時間錯位，只保留區域分組趨勢。</text>
-<text x="54" y="115" class="tiny">來源：1-6 月官方快照；7-9 月正式本地續接｜29 區彙整；不能還原單站或精確比例。</text>
+<text x="54" y="115" class="tiny">來源：1-6 月公開快照；7-9 月本機保存資料｜29 區彙整；不能還原單站或精確比例。</text>
 <rect x="54" y="135" width="1292" height="80" class="box"/>
 <text x="76" y="164" class="body strong">怎麼看</text>
 <text x="76" y="190" class="body">每張圖是一個後端特徵欄位；1-8 月以歷史曲線呈現，9 月以近期流入快照另行驗證。</text>

@@ -27,6 +27,7 @@ from aws_task_client import IsolatedTaskSigner, signed_request, NoSignedRedirect
 from serve_public_blackbox_gateway import (
     canonical_json,
     validate_blackbox_response,
+    validate_blackbox_url,
     validate_future_timestamp,
     validate_recent_timestamp,
     validate_sealed_result,
@@ -192,7 +193,7 @@ class PublicGatewayTests(unittest.TestCase):
         self.assertIn("完成任務", page)
         self.assertIn("接單", page)
         self.assertIn("確認抵達", page)
-        self.assertIn("回報異常", page)
+        self.assertIn("回報執行異常", page)
         self.assertIn('/public_shell/task.js', page)
         source = (ROOT / "public_shell/task.js").read_text(encoding="utf-8")
         self.assertNotIn("crypto.subtle", source)
@@ -214,13 +215,39 @@ class PublicGatewayTests(unittest.TestCase):
             "https://example.test",
             Path(self.temp.name),
             "us-west-2",
-            "vibegate-dev",
+            "explicit-test-profile",
         )
         with patch.object(store.signer, "request", side_effect=RuntimeError("redacted")), patch('serve_public_blackbox_gateway.request.urlopen') as network:
             with self.assertRaises(CloudUnavailable):
                 store.list_tasks()
             network.assert_not_called()
         self.assertFalse(hasattr(store, "path"))
+
+    def test_blackbox_token_target_is_loopback_only(self) -> None:
+        accepted = (
+            "http://127.0.0.1:8900/api/v1/dispatch/evaluate",
+            "http://localhost:8900/api/v1/dispatch/evaluate",
+            "http://[::1]:8900/api/v1/dispatch/evaluate",
+        )
+        for value in accepted:
+            with self.subTest(value=value):
+                self.assertEqual(value, validate_blackbox_url(value))
+
+        rejected = (
+            "https://example.test/api/v1/dispatch/evaluate",
+            "http://192.168.1.10:8900/api/v1/dispatch/evaluate",
+            "http://127.0.0.1:8900/wrong",
+            "http://127.0.0.1:8900/api/v1/dispatch/evaluate?token=value",
+            "http://user@127.0.0.1:8900/api/v1/dispatch/evaluate",
+            "http://127.0.0.1/api/v1/dispatch/evaluate",
+        )
+        for value in rejected:
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(
+                    ValueError,
+                    "blackbox_url_requires_loopback_endpoint",
+                ):
+                    validate_blackbox_url(value)
 
     def test_cloud_process_never_creates_sqlite_on_failure(self) -> None:
         cloud_port = free_port()
@@ -229,7 +256,7 @@ class PublicGatewayTests(unittest.TestCase):
             "--bind", "127.0.0.1", "--port", str(cloud_port), "--task-backend", "cloud",
             "--task-db", str(forbidden_db), "--public-task-base-url", "https://abc1234567.execute-api.us-west-2.amazonaws.com/stage",
             "--aws-session-dir", str(Path(self.temp.name) / "missing-session"),
-            "--aws-profile", "vibegate-dev", "--aws-region", "us-west-2",
+            "--aws-profile", "explicit-test-profile", "--aws-region", "us-west-2",
             "--offline-fixture", str(ROOT / "fixtures/sealed.json")], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         try:
             for _ in range(80):
@@ -272,13 +299,13 @@ class PublicGatewayTests(unittest.TestCase):
         self.assertEqual("https://example.test/stage", args.task_cloud_url)
         self.assertEqual("us-west-2", args.aws_region)
         self.assertIsNone(args.aws_profile)
-        with patch.object(sys, "argv", argv + ["--task-cloud-url", "https://api.example.test", "--aws-profile", "vibegate-dev", "--aws-region", "us-west-2"]), patch.dict(os.environ, {"AWS_REGION": "ap-northeast-1"}, clear=True):
+        with patch.object(sys, "argv", argv + ["--task-cloud-url", "https://api.example.test", "--aws-profile", "explicit-test-profile", "--aws-region", "us-west-2"]), patch.dict(os.environ, {"AWS_REGION": "ap-northeast-1"}, clear=True):
             args = parse_args()
         self.assertEqual("https://api.example.test", args.task_cloud_url)
         self.assertEqual("us-west-2", args.aws_region)
-        self.assertEqual("vibegate-dev", args.aws_profile)
+        self.assertEqual("explicit-test-profile", args.aws_profile)
         with self.assertRaisesRegex(ValueError, "cloud_resource_region_must_be_us_west_2"):
-            CloudTaskStore("https://abc1234567.execute-api.eu-west-1.amazonaws.com", "https://example.test", None, "eu-west-1", "vibegate-dev")
+            CloudTaskStore("https://abc1234567.execute-api.eu-west-1.amazonaws.com", "https://example.test", None, "eu-west-1", "explicit-test-profile")
 
     @unittest.skipUnless(shutil.which("node"), "Node.js required for browser script harness")
     def test_task_link_preserves_configured_cloud_and_lan_origin(self) -> None:
@@ -323,6 +350,9 @@ async function run(target, backend) {
                 response.url.removeprefix(self.base),
             )
         self.assertIn("./styles.css", html)
+        with self.assertRaises(error.HTTPError) as missing:
+            request.urlopen(self.base + "/missing", timeout=2)
+        self.assertEqual("no-store", missing.exception.headers["Cache-Control"])
         with request.urlopen(
             self.base + "/public_shell/styles.css",
             timeout=2,
@@ -537,12 +567,12 @@ class TaskPhoneUiTests(unittest.TestCase):
             args = parse_args()
         self.assertEqual("us-west-2", args.aws_region)
         self.assertIsNone(args.aws_profile)
-        with patch.object(sys, "argv", argv + ["--aws-profile", "vibegate-dev", "--aws-region", "us-west-2"]), patch.dict(os.environ, {}, clear=True):
+        with patch.object(sys, "argv", argv + ["--aws-profile", "explicit-test-profile", "--aws-region", "us-west-2"]), patch.dict(os.environ, {}, clear=True):
             args = parse_args()
-        self.assertEqual("vibegate-dev", args.aws_profile)
+        self.assertEqual("explicit-test-profile", args.aws_profile)
         self.assertEqual("us-west-2", args.aws_region)
         with self.assertRaisesRegex(ValueError, "cloud_resource_region_must_be_us_west_2"):
-            CloudTaskStore("https://abc1234567.execute-api.eu-west-1.amazonaws.com", "https://example.test", None, "eu-west-1", "vibegate-dev")
+            CloudTaskStore("https://abc1234567.execute-api.eu-west-1.amazonaws.com", "https://example.test", None, "eu-west-1", "explicit-test-profile")
 
     def test_global_profile_export_is_explicit_and_does_not_inject_session_paths(self) -> None:
         expiration = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
@@ -557,13 +587,13 @@ class TaskPhoneUiTests(unittest.TestCase):
             }),
             stderr="",
         )
-        signer = IsolatedTaskSigner(None, "us-west-2", "vibegate-dev")
+        signer = IsolatedTaskSigner(None, "us-west-2", "explicit-test-profile")
         with patch("aws_task_client.shutil.which", return_value="/mock/aws"), patch("aws_task_client.subprocess.run", return_value=completed) as run:
             credentials = signer.credentials()
         self.assertEqual("TEST_ONLY_ID", credentials["AccessKeyId"])
         command = run.call_args.args[0]
         environment = run.call_args.kwargs["env"]
-        self.assertEqual(["/mock/aws", "configure", "export-credentials", "--profile", "vibegate-dev", "--format", "process"], command)
+        self.assertEqual(["/mock/aws", "configure", "export-credentials", "--profile", "explicit-test-profile", "--format", "process"], command)
         self.assertNotIn("AWS_CONFIG_FILE", environment)
         self.assertNotIn("AWS_SHARED_CREDENTIALS_FILE", environment)
 

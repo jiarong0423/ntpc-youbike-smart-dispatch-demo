@@ -5,7 +5,7 @@
   "runtime_mode": "SEALED_DEMO_FIXTURE",
   "demo_scope": {
     "city": "新北市",
-    "as_of_label": "2026年1至9月安全轉換展示；非原始即時逐筆資料",
+    "as_of_label": "2026年1至9月欄位縮減、區間化展示；非原始即時逐筆資料",
     "data_class": "sealed_replay",
     "public_claim": "poc_display"
   },
@@ -21,8 +21,8 @@
     "warning_count": 15,
     "stable_count": 11,
     "active_case_count": 6,
-    "mode_banner": "離線展示：29區安全轉換固定資料（非即時）",
-    "operator_message": "公開端維持相同資料契約、優先級方向與派工流程；敏感絕對值經安全轉換，不保證逐筆數值與私有端完全相同。"
+    "mode_banner": "離線展示：29區固定參考資料（非即時）",
+    "operator_message": "公開端使用既定資料契約呈現優先級方向與派工流程；數值已經欄位縮減、區間化與時間位移處理，不代表原始逐筆資料。"
   },
   "districts": [
     {

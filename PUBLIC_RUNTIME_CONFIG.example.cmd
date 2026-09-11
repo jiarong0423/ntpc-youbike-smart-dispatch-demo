@@ -8,5 +8,5 @@ rem Optional separate AWS task API base URL; blank uses PUBLIC_TASK_BASE_URL.
 set "TASK_CLOUD_API_URL="
 rem Cloud mode requires an explicit named AWS CLI profile. No key or session belongs here.
 set "YOUBIKE_AWS_PROFILE="
-rem YouBike task resources are fixed to this reviewed region.
+rem YouBike task resources are configured for this region.
 set "YOUBIKE_AWS_REGION=us-west-2"

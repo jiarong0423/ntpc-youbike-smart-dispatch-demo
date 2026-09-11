@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://example.local/soong-youbike/contracts/blackbox_response.schema.json",
+  "$id": "https://example.local/ntpc-youbike-demo/contracts/blackbox_response.schema.json",
   "title": "YouBike Black Box Evaluation Response",
   "type": "object",
   "additionalProperties": false,

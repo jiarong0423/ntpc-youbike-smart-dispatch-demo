@@ -37,7 +37,7 @@ class BedrockBoundaryTests(unittest.TestCase):
             payload["policy_boundary"]["do_not_decide_dispatch"]
         )
 
-    def test_vibegate_profile_is_rejected(self) -> None:
+    def test_explicit_named_profile_is_required(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             with mock.patch.dict(
                 os.environ,
@@ -46,10 +46,10 @@ class BedrockBoundaryTests(unittest.TestCase):
             ):
                 with self.assertRaisesRegex(
                     ValueError,
-                    "vibegate_profile_is_frozen",
+                    "aws_profile_invalid",
                 ):
                     adapter.isolated_environment(
-                        "vibegate-dev",
+                        "",
                         "ap-southeast-2",
                         Path(temp),
                     )
@@ -69,6 +69,8 @@ class BedrockBoundaryTests(unittest.TestCase):
                 str(output),
                 "--session-dir",
                 str(session),
+                "--profile",
+                "explicit-test-profile",
             ]
             with mock.patch(
                 "sys.argv",
@@ -81,7 +83,10 @@ class BedrockBoundaryTests(unittest.TestCase):
                 )
             )
             self.assertFalse(summary["bedrock_called"])
-            self.assertTrue(summary["passed"])
+            self.assertTrue(summary["preparation_valid"])
+            self.assertFalse(summary["inference_succeeded"])
+            self.assertTrue(summary["profile_configured"])
+            self.assertNotIn("profile", summary)
 
 
 if __name__ == "__main__":

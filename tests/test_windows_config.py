@@ -81,8 +81,7 @@ class WindowsConfigTests(unittest.TestCase):
         self.assertIn("Cloud mode requires YOUBIKE_AWS_PROFILE", text)
         self.assertIn('set "YOUBIKE_AWS_REGION=us-west-2"', text)
         self.assertIn('if /I not "%YOUBIKE_AWS_REGION%"=="us-west-2"', text)
-        self.assertNotIn("youbike-hackathon", text)
-        self.assertNotIn("youbike-personal-rehearsal", text)
+        self.assertNotRegex(text, r'--aws-profile\s+[^"%]')
 
     def test_lan_detection_policy_uses_unique_usable_ipv4(self) -> None:
         text = LAUNCHER.read_text()

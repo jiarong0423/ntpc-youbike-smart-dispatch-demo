@@ -1,46 +1,44 @@
 # Security Scan Evidence
 
 Review date: 2026-09-11
-Owner: repository owner
-Scope: PUBLIC_EXPORT_MANIFEST.json allowlisted files
+Scope: `PUBLIC_EXPORT_MANIFEST.json` allowlisted files
+Candidate ID: manifest generated at `2026-09-11T07:20:00+00:00`
 
-## Results
+## Release Gate Results
 
-- Python and JavaScript syntax checks: PASS
-- Playwright responsive visual smoke: PASS on 1440x900 and 390x844
-- Unit and integration tests: 66 passed locally; current Windows Python 3.11, 3.12 and 3.13 Actions are required after the release commit
-- LocalGuard development safety gate: 2 reviewed medium findings, 0 blocking
-- AI Security export gate: PASS, 0 blocking
-- Release boundary safety gate: 0 findings, 0 blocking
-- Explicit personal data and private algorithm scan: 0 findings
+- Python 3.13.12 and JavaScript syntax checks: PASS.
+- Unit and integration suite: 67 cases executed at `2026-09-11T07:13:45+00:00`; 66 passed and the Windows-only PowerShell case was skipped on macOS.
+- AI Security `export-gate`: executed locally against this allowlisted release candidate; PASS with 0 blocking findings.
+- Release boundary safety gate: executed locally against this allowlisted release candidate; PASS with 0 findings.
+- Pattern-based secret and privacy scan: PASS for the rules listed in `SECRET_SCAN_EVIDENCE.md`.
+- Windows Python 3.11, 3.12 and 3.13 Actions must pass again after the release commit.
 
-## Remediation Performed
+The AI Security export gate is the scanner used for this release review. It is independent of AWS accounts, AWS CLI profile names and any other project. Its PASS decision applies only to this public export boundary; it does not establish AWS deployment readiness.
 
-- Replaced long protocol literals and route strings that resembled secrets.
-- Removed a client-side hidden marker that resembled an authorization gate.
-- Kept API responses and browser requests on no-store cache policy.
-- Removed remote algorithm mode from the published result contract.
-- Enforced an exact public static-file allowlist.
-- Allowed only the explicit `mode=offline` query on the public index; unknown index queries remain blocked.
-- Enforced LIVE result, response, and source timestamp freshness with stale, future, and missing-value rejection tests.
-- Enforced the complete black-box request and response JSON Schemas, including unknown-field rejection and short-lived credential expiry.
-- Enforced equality between the repository package, manifest allowlist and SHA-256 key set.
-- Removed exact percentage labels from the public historical SVG while retaining intervalized trend direction.
+The export gate used the local `ai-security-rules` checkout at commit `a6a034f0215fa6e3272bba11c0ae2ef9b6deee1b`. The release-boundary scanner script SHA-256 was `9aa0aadaa4d9eeeb1092a998ae0c869783b70f137d65a1384274e7cd8238c992`. Sanitized reports are stored outside the repository so the public package does not retain local audit paths.
 
-## Reviewed Tool Finding
+## Controls Verified In The Candidate
 
-The AI Security portfolio scanner reports the GitHub Actions dependency installation step twice as high-risk executable configuration. This is an expected CI package-runner step using the two pinned direct dependencies in requirements.txt. The dedicated export gate evaluated the same candidate as PASS with zero blocking items.
+- The private black-box target accepts only the exact loopback evaluation route; arbitrary HTTPS hosts, LAN hosts, credentials in URLs, queries and alternate paths are rejected before the bearer credential is read.
+- Static-file serving uses an exact allowlist, and all HTTP responses include `Cache-Control: no-store` and `Referrer-Policy: no-referrer`.
+- Offline data is selected explicitly. Live-source failure does not silently substitute the fixed fixture.
+- Live result, response and source timestamps are checked for freshness, future values and missing values.
+- Black-box request and response JSON Schemas reject unknown fields and expired short-lived credentials.
+- The repository file set and SHA-256 map must match the public export manifest.
+- Bedrock input is schema validated and excludes raw snapshots, coordinates, station names, identity data and private algorithm fields.
+- Bedrock prepare-only mode records preparation separately from inference and does not report a provider call as successful when none occurred.
+- Two direct Python dependencies are pinned in `requirements.txt`. The GitHub Actions used by the workflow are version-tag references and are not represented as commit-SHA-pinned dependencies.
 
-LocalGuard reports the documented public API route map and a possible browser-cache risk. The route map is intentionally public; private credentials remain server-side and the private API is loopback-only. No service worker or Cache Storage implementation exists, and every API response sends Cache-Control: no-store. Both findings are reviewed documentation-pattern matches rather than unmitigated runtime exposures.
+## Reviewed Scanner Signals
 
-## Residual Risk
+The AI Security portfolio rules identify the GitHub Actions package-install steps as executable configuration. The export gate evaluates those workflow lines within the public allowlist and returns no blocking finding. This is a scoped review of the candidate, not a general approval of arbitrary dependency execution.
 
-A real Windows machine, phone QR scan and paid Bedrock call still require venue-owner execution. Those runtime checks do not change the publication boundary.
+A worktree gitleaks scan reports one reviewed match on the `PUBLIC_EXPORT_MANIFEST.json` entry that associates `SECRET_SCAN_EVIDENCE.md` with a SHA-256 digest. The matched value is a file digest, not credential material. No credential value is recorded in this file.
 
-## Completion Contract Review
+## Workflow Evidence And Remaining Acceptance
 
-Review date: 2026-09-11. Local Chromium checks at desktop 1440x900 and mobile 390x844 passed: the completion button changes OPEN to COMPLETED, reload retains completion, and no horizontal overflow was found. These are viewport simulations, not physical phone or Windows evidence.
+The local test suite covers accept → arrive → complete ordering, exception audit-only behavior, event idempotency, concurrent completion, expired and forged signatures, transaction rollback and restart persistence. A browser-script harness checks the three-button state sequence. These checks do not establish physical phone, target Windows device or cellular-network acceptance.
 
-The revised ledger rejects unknown schema versions and drift before initialization. Local tests cover failed-event audit, request-bound idempotency, concurrent completion, expired and forged signatures, transaction rollback and restart persistence. A local process issues short-lived demo capabilities; this is not authenticated cloud operator authorization. Cloud publication remains blocked pending separate authentication, quota and deployment review.
+Independent read-only verification could not bind loopback ports inside its restricted sandbox. The passing socket-test result above comes from the authorized local execution environment and is not represented as a second independent run.
 
-The current allowlisted tree passed the local AI Security export gate with zero blocking findings. The two pinned CI package-runner indicators remain the reviewed findings described above. Windows Actions results must be verified separately for the new commit.
+AWS API Gateway, Lambda, DynamoDB, Google Sheets mirroring and a paid Bedrock call remain deployment-stage checks. The repository validates client-side contracts, endpoint form, profile syntax and signing region; it does not prove the selected AWS account, role, IAM resource scope, quota or deployed resource ownership.

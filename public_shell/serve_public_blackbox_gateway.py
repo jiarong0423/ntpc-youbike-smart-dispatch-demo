@@ -98,14 +98,23 @@ def validate_task_event_request(payload: Any) -> dict[str, Any]:
 
 def validate_blackbox_url(value: str) -> str:
     parsed = parse.urlparse(value)
-    if parsed.scheme == "https" and parsed.netloc:
-        return value
+    try:
+        port = parsed.port
+    except ValueError as exc:
+        raise ValueError("blackbox_url_requires_loopback_endpoint") from exc
     if (
         parsed.scheme == "http"
         and parsed.hostname in {"127.0.0.1", "localhost", "::1"}
+        and port is not None
+        and parsed.path == "/api/v1/dispatch/evaluate"
+        and not parsed.username
+        and not parsed.password
+        and not parsed.params
+        and not parsed.query
+        and not parsed.fragment
     ):
         return value
-    raise ValueError("blackbox_url_requires_https_or_loopback_http")
+    raise ValueError("blackbox_url_requires_loopback_endpoint")
 
 
 def read_credential(path: Path) -> str:
@@ -517,7 +526,6 @@ class GatewayHandler(SimpleHTTPRequestHandler):
     ) -> None:
         body = canonical_json(payload)
         self.send_response(status)
-        self.send_header("Cache-Control", "no-store")
         self.send_header(
             "Content-Type",
             "application/json; charset=utf-8",
@@ -531,7 +539,6 @@ class GatewayHandler(SimpleHTTPRequestHandler):
 
     def send_svg(self, body: bytes) -> None:
         self.send_response(HTTPStatus.OK)
-        self.send_header("Cache-Control", "no-store")
         self.send_header(
             "Content-Type",
             "image/svg+xml; charset=utf-8",
@@ -572,6 +579,7 @@ class GatewayHandler(SimpleHTTPRequestHandler):
         )
 
     def end_headers(self) -> None:
+        self.send_header("Cache-Control", "no-store")
         self.send_header("Referrer-Policy", "no-referrer")
         super().end_headers()
 
@@ -597,7 +605,6 @@ class GatewayHandler(SimpleHTTPRequestHandler):
         ]
         if path == "/":
             self.send_response(HTTPStatus.FOUND)
-            self.send_header("Cache-Control", "no-store")
             self.send_header("Location", "/public_shell/index.html")
             self.end_headers()
             return None
@@ -900,7 +907,6 @@ class GatewayHandler(SimpleHTTPRequestHandler):
         parsed_path = parse.urlparse(self.path)
         if parsed_path.path == "/":
             self.send_response(HTTPStatus.FOUND)
-            self.send_header("Cache-Control", "no-store")
             self.send_header("Location", "/public_shell/index.html")
             self.end_headers()
             return None

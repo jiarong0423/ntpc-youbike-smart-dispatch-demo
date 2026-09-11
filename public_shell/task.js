@@ -54,7 +54,7 @@
       const validProtocol = backend === "cloud" ? completionURL.protocol === "https:" : ["http:", "https:"].includes(completionURL.protocol);
       if (!validProtocol || completionURL.username || completionURL.password || completionURL.search ||
           !completionURL.pathname.endsWith("/tasks/" + encodeURIComponent(taskId)) || !completionURL.hash) {
-        throw new Error("任務網址不符合安全契約");
+        throw new Error("任務網址格式不符合要求");
       }
       if (!grant) grant = new URLSearchParams(completionURL.hash.slice(1));
     }
@@ -66,7 +66,7 @@
     }
   }
   async function createEvent(eventType) {
-    if (!window.crypto || !crypto.getRandomValues) throw new Error("此瀏覽器無法產生安全事件識別碼。");
+    if (!window.crypto || !crypto.getRandomValues) throw new Error("此瀏覽器無法建立事件識別碼。");
     if (!grant || Number(grant.get("expires_at")) <= Date.now() / 1000) throw new Error("QR 已過期，請由任務池重新開啟。");
     const random = crypto.getRandomValues(new Uint8Array(32));
     const ephemeral = Array.from(random, n => n.toString(16).padStart(2, "0")).join("");
@@ -102,7 +102,14 @@
       });
       const payload = await response.json();
       if (!response.ok || !payload.ok) {
-        throw new Error("事件送出失敗：" + (payload.error || response.status));
+        const messages = {
+          task_not_accepted: "請先接單，再執行下一步。",
+          task_not_arrived: "請先確認抵達，再完成任務。",
+          task_already_completed: "這筆任務已完成。",
+          event_id_conflict: "這次操作與既有事件衝突，請重新載入任務。",
+          signature_invalid: "任務連結已失效，請重新掃描 QR Code。"
+        };
+        throw new Error(messages[payload.error] || "事件送出失敗，請稍後重試。");
       }
       render(payload.task);
       showMessage(

@@ -6,18 +6,18 @@
 | --- | --- | --- | --- | --- | --- |
 | Dispatch workspace | `/public_shell/index.html` | Browser UI plus same-origin BFF | Contract-valid black-box result or operator-selected offline fixture | Review 29 districts, priority bands and active tasks | Visible mode, source time, freshness state and case count |
 | Task pool jump | `Open task` in the dispatch workspace | `public_shell/app.js` | Selected `case_id` | Convert the case to a stable `task_id` and open its task URL | `/tasks/{task_id}` |
-| Task handoff | `/tasks/{task_id}` | Task page plus selected local/cloud authority | One validated `task_id` | Scan, accept, confirm arrival, then complete: OPEN to COMPLETED | Append-only accept/arrive/exception/complete events, accepted and arrived times, current state and duplicate-event protection |
+| Task handoff | `/tasks/{task_id}` | Task page plus the selected task backend | One validated `task_id` | Scan, accept, confirm arrival, then complete: OPEN to COMPLETED | Local implementation records append-only events; cloud behavior remains pending deployment verification |
 | QR handoff | `/api/handoff/tasks/{task_id}/qr.svg` | Same-origin BFF | Existing `task_id` and `PUBLIC_TASK_BASE_URL` | Generate local LAN or AWS HTTPS `/tasks/{task_id}` QR | Phone opens the exact task URL; no official bicycle unlock function |
 | Evidence layer | `index.html` section `Data evidence` | Static public evidence assets | Fixed public summaries | Review historical coverage, recent batches, weather and operating cases | Versioned SVG summaries with explicit publication limits |
 | Live result boundary | `/api/blackbox/result` | Same-origin BFF | Authenticated response from `127.0.0.1:8781` | Validate schema, result time, source time, credential expiry and integrity hash | Near-real-time result only after every gate passes; otherwise fail-closed |
-| Offline workflow | `/public_shell/index.html?mode=offline` | Same-origin BFF | `fixtures/sealed.json` | Run the full display and task workflow without the private engine | Fixed safe-transformed demo, visibly marked non-realtime |
+| Offline workflow | `/public_shell/index.html?mode=offline` | Same-origin BFF | `fixtures/sealed.json` | Run the display and local task workflow without the private engine | Fixed field-reduced and intervalized demo data, visibly marked non-realtime |
 | Bedrock explanation | `public_shell/bedrock_explainer_adapter.py` | Server-side adapter | Sanitized district bands and action counts | Create an operator-readable explanation | Request/response evidence without changing dispatch decisions |
 
 ## Windows Configuration Boundary
 
 `INSTALL_AND_RUN_WINDOWS.cmd` installs the external runtime, then calls `public_shell/start_windows.cmd`. The launcher preserves explicit `PUBLIC_TASK_BASE_URL`, accepts `[LAN-IP]` for local mode, and otherwise requires exactly one usable Windows IPv4. Missing or multiple candidates stop startup with an override instruction. `TASK_BACKEND=cloud` requires an AWS HTTPS task base, an explicit `YOUBIKE_AWS_PROFILE`, and `YOUBIKE_AWS_REGION=us-west-2`; it may use the existing global AWS CLI profile and never starts a local SQLite task ledger. `PUBLIC_RUNTIME_CONFIG.example.cmd` is a nonsecret reference, not an automatically loaded credential file.
 
-Local QR is reachable only on the same network. Cloud QR is independent of the venue LAN after deployment and phone-network verification. Static path tests and mocked PowerShell detection tests do not establish Windows S513E or phone acceptance.
+Local QR is reachable only on the same network. Cloud QR is independent of the venue LAN after deployment and phone-network verification. Static path tests and mocked PowerShell detection tests do not establish target Windows device or phone acceptance.
 
 ## Responsibility Split
 
@@ -39,7 +39,7 @@ Local QR is reachable only on the same network. Cloud QR is independent of the v
 
 ## Evidence-To-Action Scenarios
 
-| Scenario | What the evidence shows | What the demo can execute |
+| Scenario | What the evidence shows | What the demo presents |
 | --- | --- | --- |
 | Historical baseline versus recent snapshot drift | A district moves outside its usual time-window pattern | Change the regional priority band and create a dispatch task |
 | Weather and holiday bicycle-lane effect | Borrow and return duration may lengthen while turnover falls | Extend observation, prepare reserve bicycles and move redistribution to off-peak |

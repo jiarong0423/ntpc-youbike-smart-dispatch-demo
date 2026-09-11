@@ -14,7 +14,7 @@ flowchart LR
     SQLITE --> LANQR["Detected or explicit LAN IPv4 /tasks/id"]
   end
   subgraph CLOUD["AWS target / deployment verification required"]
-    API["API Gateway HTTPS"] --> LAMBDA["Lambda / validated accept, arrive and complete transitions"]
+    API["API Gateway HTTPS"] --> LAMBDA["Lambda target / accept, arrive and complete contract"]
     LAMBDA --> DDB["DynamoDB / cloud authority"]
     DDB -. "Planned retryable audit mirror" .-> SHEET["Google Sheets / pending"]
     LAMBDA -. "Planned sanitized explanation" .-> BEDROCK["Bedrock / separate acceptance"]
@@ -28,9 +28,9 @@ flowchart LR
 
 `TASK_BACKEND=local` creates only the external local ledger; `TASK_BACKEND=cloud` uses the AWS task API and never creates a fallback local task ledger. Offline/live selects result provenance independently from task storage. `PUBLIC_TASK_BASE_URL` preserves an explicit operator URL; local auto-detection requires exactly one usable IPv4 and stops on ambiguity. AWS HTTPS URLs may include a stage prefix, followed by `/tasks/{task_id}`. The cloud API can be separately configured with `TASK_CLOUD_API_URL`. Cloud mode requires an explicit `YOUBIKE_AWS_PROFILE`; every YouBike resource request is explicitly signed for `YOUBIKE_AWS_REGION=us-west-2`, independent of the profile's login-region setting.
 
-These boundaries describe the configured implementation and deployment target. Actual AWS deployment, cloud authentication, Windows S513E and cellular QR acceptance require independent evidence. Sheets mirroring and Bedrock explanation are separate pending integrations. Local completion is never evidence of AWS confirmation.
+These boundaries describe the local implementation and the proposed deployment target. Actual AWS deployment, cloud authentication, target Windows device and cellular QR acceptance require independent evidence. Sheets mirroring and Bedrock explanation are separate pending integrations. Local completion is never evidence of AWS confirmation.
 
-The public application exposes the complete accept-to-arrive-to-complete operating workflow. `accepted_at` and `arrived_at` record separate transitions while `status` remains `OPEN` until completion. Exception events remain audit-only and do not advance either transition. The private engine supplies only contract-bound results and does not send formulas, weights, exact scores or source databases to the browser.
+The local public application implements the accept-to-arrive-to-complete state machine. `accepted_at` and `arrived_at` record separate transitions while `status` remains `OPEN` until completion. Exception events remain audit-only and do not advance either transition. The private engine supplies only contract-bound results and does not send formulas, weights, exact scores or source databases to the browser.
 
 ## Dispatch Vehicle Policy
 
@@ -61,9 +61,9 @@ The executable page, API and evidence ownership table is maintained in [PAGE_AND
 
 | Mode | Result source | Task and QR workflow | Claim |
 | --- | --- | --- | --- |
-| `LIVE_LOCAL_SANDBOX` | Owner-controlled Windows black-box API | Local workflow tested | Near-real-time only when source freshness and result contract both pass |
-| `SEALED_DEMO_FIXTURE` | Explicit safe-transformed fixed fixture | Local workflow tested | Offline demonstration only |
-| `PORTABLE_SEALED_FALLBACK` | Owner-provided sealed package | Local workflow tested | Fixed-time fallback, never realtime |
+| `LIVE_LOCAL_SANDBOX` | Operator-controlled Windows black-box API | Local workflow tested | Near-real-time only when source freshness and result contract both pass |
+| `SEALED_DEMO_FIXTURE` | Explicit field-reduced, intervalized fixed fixture | Local workflow tested | Offline demonstration only |
+| `PORTABLE_SEALED_FALLBACK` | Operator-provided sealed package | Local workflow tested | Fixed-time fallback, never realtime |
 | `AWS_EXPLANATION` | Sanitized district summary | Does not create or change dispatch decisions | Explanation layer only |
 
 ## Data Publication Semantics
@@ -74,7 +74,7 @@ The executable page, API and evidence ownership table is maintained in [PAGE_AND
 | Dated compact snapshot | 2026-09-08 19:16 through 2026-09-11 01:38, 313 batches and 500,824 rows over a 1,606-station dimension | Completeness does not extend beyond that batch |
 | Weather and calendar evidence | Historical comparison of conditions and time periods | Not proof that weather alone caused a dispatch outcome |
 | Live black-box result | Near-real-time only when source timestamp, freshness, and schema validation pass | A healthy connection alone does not prove fresh data |
-| Safe-transformed fixed fixture | Operator-selected workflow demonstration | Never presented as a calculated or current result |
+| Field-reduced, intervalized fixed fixture | Operator-selected workflow demonstration | Never presented as a calculated or current result; transformation wording is not a security certification |
 
 ## Trust Boundaries
 
@@ -85,4 +85,4 @@ The executable page, API and evidence ownership table is maintained in [PAGE_AND
 5. Bedrock receives district aliases, bands, small counts, reason tags and policy flags only.
 6. Bedrock failure does not stop local dispatch, task creation or QR actions.
 7. Offline data is selected explicitly and is never an automatic fallback.
-8. The task BFF may use the explicitly selected `vibegate-dev` AWS CLI profile for the rehearsal. The Bedrock adapter retains its separate forbidden-profile policy, so Bedrock stays disabled with that profile or uses a separately approved profile.
+8. AWS access requires an explicitly selected, syntactically valid CLI profile. The profile name is an operator selector; IAM least privilege and resource policies provide the actual authorization boundary.
