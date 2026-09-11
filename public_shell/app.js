@@ -170,7 +170,7 @@
       setText(route, `${handoff.label || "-"} · ${label("eta", handoff.eta_band)}`);
       if (handoff.present === true) {
         const taskId = "task-" + item.case_id.slice(5);
-        taskLink.href = "./task.html?task_id=" + encodeURIComponent(taskId);
+        taskLink.href = "/tasks/" + encodeURIComponent(taskId);
       } else {
         taskLink.remove();
       }
@@ -197,8 +197,16 @@
     return response.json();
   }
 
+  loadPayload("/api/integration/status").then(status => {
+    const output = document.getElementById("integration-status");
+    if (output) output.textContent = "黑箱 " + status.health + " · " + status.source_mode + " · " + status.generated_at + " · " + status.districts.length + " 區 · 任務帳本 " + status.task_backend;
+  }).catch(() => {
+    const output = document.getElementById("integration-status");
+    if (output) output.textContent = "黑箱降級：未取得有效結果，不產生新決策。";
+  });
+
   if (offlineMode) {
-    loadPayload(fixturePath)
+    loadPayload(liveResultPath)
       .then(render)
       .catch((error) => {
         console.warn(error.message || "fixture load failed");

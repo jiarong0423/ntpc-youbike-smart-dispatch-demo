@@ -10,7 +10,8 @@
     "event_id",
     "device_hash",
     "signature",
-    "occurred_at"
+    "occurred_at",
+    "event_type"
   ],
   "properties": {
     "task_id": {
@@ -42,6 +43,15 @@
     "occurred_at": {
       "type": "string",
       "format": "date-time"
+    },
+    "event_type": {
+      "type": "string",
+      "enum": [
+        "accept",
+        "arrive",
+        "complete",
+        "exception"
+      ]
     }
   }
 }

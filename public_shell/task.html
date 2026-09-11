@@ -5,11 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <link rel="icon" href="data:,">
     <title>YouBike 任務交接</title>
-    <link rel="stylesheet" href="./task.css">
+    <link rel="stylesheet" href="/public_shell/task.css">
   </head>
   <body>
     <main class="task-shell">
-      <nav><a href="./index.html">返回任務池</a></nav>
+      <nav><a href="/public_shell/index.html">返回任務池</a></nav>
       <header>
         <p class="eyebrow">Public task handoff</p>
         <h1>任務交接</h1>
@@ -25,8 +25,12 @@
             <div><dt>更新時間</dt><dd id="task-updated">-</dd></div>
           </dl>
           <div class="actions" aria-label="task actions">
+            <button type="button" data-event="accept" disabled>接單</button>
+            <button type="button" data-event="arrive" disabled>確認抵達</button>
             <button type="button" data-event="complete" disabled>完成任務</button>
+            <button type="button" data-event="exception" disabled>回報異常／驗證失敗</button>
           </div>
+          <p id="workflow-notice">請先接單，抵達現場後確認到站，再完成任務。</p>
           <p id="runtime-notice">目前為本機任務帳本；此結果不代表 AWS 已同步。</p>
           <p id="message" role="status"></p>
         </article>
@@ -37,6 +41,6 @@
         </aside>
       </section>
     </main>
-    <script src="./task.js"></script>
+    <script src="/public_shell/task.js"></script>
   </body>
 </html>

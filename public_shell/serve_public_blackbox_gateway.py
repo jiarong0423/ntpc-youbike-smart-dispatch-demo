@@ -22,6 +22,7 @@ from jsonschema import Draft202012Validator, FormatChecker
 from referencing import Registry, Resource
 
 from task_ledger import TaskStore
+from aws_task_client import IsolatedTaskSigner, NoSignedRedirect, validate_api_endpoint
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_BLACKBOX_URL = "http://127.0.0.1:8781/api/v1/dispatch/evaluate"
@@ -38,6 +39,9 @@ BLACKBOX_REQUEST_SCHEMA = json.loads(
 BLACKBOX_RESPONSE_SCHEMA = json.loads(
     (CONTRACT_DIR / "blackbox_response.schema.json").read_text(encoding="utf-8")
 )
+TASK_EVENT_REQUEST_SCHEMA = json.loads(
+    (CONTRACT_DIR / "task_event_request.schema.json").read_text(encoding="utf-8")
+)
 FORMAT_CHECKER = FormatChecker()
 CONTRACT_REGISTRY = Registry().with_resource(
     SEALED_RESULT_SCHEMA["$id"], Resource.from_contents(SEALED_RESULT_SCHEMA)
@@ -51,6 +55,10 @@ BLACKBOX_REQUEST_VALIDATOR = Draft202012Validator(
 BLACKBOX_RESPONSE_VALIDATOR = Draft202012Validator(
     BLACKBOX_RESPONSE_SCHEMA,
     registry=CONTRACT_REGISTRY,
+    format_checker=FORMAT_CHECKER,
+)
+TASK_EVENT_REQUEST_VALIDATOR = Draft202012Validator(
+    TASK_EVENT_REQUEST_SCHEMA,
     format_checker=FORMAT_CHECKER,
 )
 STATIC_PATHS = {
@@ -76,6 +84,16 @@ def canonical_json(payload: Any) -> bytes:
         separators=(",", ":"),
         sort_keys=True,
     ).encode("utf-8")
+
+
+def validate_task_event_request(payload: Any) -> dict[str, Any]:
+    errors = sorted(
+        TASK_EVENT_REQUEST_VALIDATOR.iter_errors(payload),
+        key=lambda item: list(item.path),
+    )
+    if errors or not isinstance(payload, dict):
+        raise ValueError("task_event_request_json_schema_invalid")
+    return payload
 
 
 def validate_blackbox_url(value: str) -> str:
@@ -344,6 +362,123 @@ def probe_blackbox_health(
     }
 
 
+class CloudUnavailable(RuntimeError):
+    pass
+
+
+YOUBIKE_RESOURCE_REGION = "us-west-2"
+
+
+class CloudTaskStore:
+    """Exclusive HTTPS task authority; never creates a local database."""
+    def __init__(self, api_url: str, public_base_url: str, session_dir: Path | None, region: str, profile: str) -> None:
+        if region != YOUBIKE_RESOURCE_REGION:
+            raise ValueError("cloud_resource_region_must_be_us_west_2")
+        self.signer = IsolatedTaskSigner(session_dir, region, profile)
+        self.api_url = validate_api_endpoint(api_url, region)
+        self.public_base_url = validate_task_base(public_base_url, cloud=True)
+
+    def call(self, suffix: str, payload: Any = None) -> tuple[int, dict[str, Any]]:
+        try:
+            outbound = self.signer.request(self.api_url + suffix,
+                None if payload is None else canonical_json(payload))
+        except RuntimeError:
+            raise CloudUnavailable("isolated_aws_session_unavailable") from None
+        try:
+            response = request.build_opener(NoSignedRedirect()).open(outbound, timeout=5)
+        except error.HTTPError as exc:
+            if exc.code in {400, 403, 404, 409, 413}:
+                return exc.code, {"ok": False, "error": "cloud_request_rejected"}
+            raise CloudUnavailable("cloud_task_service_unavailable") from None
+        except (OSError, error.URLError):
+            raise CloudUnavailable("cloud_task_service_unavailable") from None
+        with response:
+            encoded = response.read(1024 * 1024 + 1)
+            if len(encoded) > 1024 * 1024:
+                raise CloudUnavailable("cloud_response_invalid")
+            try:
+                body = json.loads(encoded)
+            except (ValueError, UnicodeDecodeError):
+                raise CloudUnavailable("cloud_response_invalid") from None
+            if not isinstance(body, dict):
+                raise CloudUnavailable("cloud_response_invalid")
+            return response.status, body
+
+    @staticmethod
+    def safe_task(task: Any) -> dict[str, Any]:
+        schema = json.loads((CONTRACT_DIR / "task_response.schema.json").read_text(encoding="utf-8"))
+        if not isinstance(task, dict):
+            raise CloudUnavailable("cloud_task_contract_invalid")
+        safe = {key: task[key] for key in schema["properties"] if key in task}
+        if list(Draft202012Validator(schema, format_checker=FORMAT_CHECKER).iter_errors(safe)):
+            raise CloudUnavailable("cloud_task_contract_invalid")
+        return safe
+
+    def list_tasks(self) -> list[dict[str, Any]]:
+        code, body = self.call("/api/handoff/tasks")
+        if code != 200 or not isinstance(body.get("tasks"), list):
+            raise CloudUnavailable("cloud_task_service_unavailable")
+        return [self.safe_task(task) for task in body["tasks"]]
+
+    def detail(self, task_id: str) -> dict[str, Any] | None:
+        code, body = self.call("/api/handoff/tasks/" + parse.quote(task_id, safe=""))
+        if code == 404:
+            return None
+        if code != 200 or body.get("ok") is not True:
+            raise CloudUnavailable("cloud_task_service_unavailable")
+        body["task"] = self.safe_task(body.get("task"))
+        return body
+
+    def get_task(self, task_id: str) -> dict[str, Any] | None:
+        body = self.detail(task_id)
+        return body["task"] if body else None
+
+    def completion_link(self, task_id: str) -> str:
+        code, body = self.call("/tasks/" + parse.quote(task_id, safe="") + "/grant", {})
+        grant = body.get("grant")
+        if code != 200 or not isinstance(grant, dict) or grant.get("task_id") != task_id:
+            raise CloudUnavailable("cloud_signed_grant_required")
+        allowed = {"task_id", "task_type", "issued_at", "expires_at", "device_salt", "device_hash", "signature"}
+        if set(grant) != allowed:
+            raise CloudUnavailable("cloud_grant_contract_invalid")
+        return self.public_base_url + "/tasks/" + parse.quote(task_id, safe="") + "#" + parse.urlencode(grant)
+
+    def seed_result(self, result: dict[str, Any]) -> int:
+        count = 0
+        for case in result["selected_cases"]:
+            handoff = case["route_handoff"]
+            if handoff.get("present") is not True:
+                continue
+            task = {key: case[key] for key in ("case_id", "display_name", "district_id", "action_label", "priority_band")}
+            task.update({"task_id": "task-" + case["case_id"][5:], "route_label": handoff["label"], "eta_band": handoff["eta_band"]})
+            code, body = self.call("/tasks", task)
+            if code not in {200, 201, 409}:
+                raise CloudUnavailable("cloud_task_seed_failed")
+            count += 1
+        return count
+
+    def apply_event(self, task_id: str, payload: Any) -> tuple[int, dict[str, Any]]:
+        code, body = self.call("/api/handoff/tasks/" + parse.quote(task_id, safe="") + "/events", payload)
+        if code == 200 and body.get("ok") is True:
+            return code, {"ok": True, "task": self.safe_task(body.get("task")),
+                          "duplicate": body.get("duplicate") is True, "audit_only": body.get("audit_only") is True}
+        return code, {"ok": False, "error": "cloud_request_rejected"}
+
+    def reject(self, task_id: str, event_id: Any, reason: str, status: int = 400):
+        code, body = self.call("/api/handoff/tasks/" + parse.quote(task_id, safe="") + "/events", {})
+        return status, {"ok": False, "error": reason}
+
+
+def validate_task_base(value: str, *, cloud: bool) -> str:
+    parsed = parse.urlparse(value)
+    if (parsed.scheme not in ({"https"} if cloud else {"http", "https"})
+            or not parsed.hostname or parsed.username or parsed.password
+            or parsed.query or parsed.fragment
+            or (not cloud and parsed.path not in {"", "/"})):
+        raise ValueError("task_base_url_invalid")
+    return value.rstrip("/")
+
+
 class GatewayHandler(SimpleHTTPRequestHandler):
     server_version = "YouBikePublicGateway/2.0"
 
@@ -441,11 +576,18 @@ class GatewayHandler(SimpleHTTPRequestHandler):
         super().end_headers()
 
     def completion_link(self, task_id: str) -> str:
+        if self.server.task_backend == "cloud":
+            return self.task_store.completion_link(task_id)
         grant = self.task_store.issue_signature(task_id)
-        return (self.server.public_base_url + "/public_shell/task.html?task_id="
-                + parse.quote(task_id) + "#" + parse.urlencode(grant))
+        return (self.server.public_base_url + "/tasks/" + parse.quote(task_id) + "#" + parse.urlencode(grant))
 
     def do_GET(self) -> None:
+        try:
+            return self.handle_GET()
+        except CloudUnavailable:
+            return self.send_json(503, {"ok": False, "error": "cloud_task_service_unavailable", "task_backend": "cloud", "fallback": False})
+
+    def handle_GET(self) -> None:
         parsed_path = parse.urlparse(self.path)
         path = parsed_path.path
         parts = [
@@ -459,6 +601,17 @@ class GatewayHandler(SimpleHTTPRequestHandler):
             self.send_header("Location", "/public_shell/index.html")
             self.end_headers()
             return None
+
+        if path == "/api/integration/status" and not parsed_path.query:
+            try:
+                result = self.load_result()
+            except (OSError, ValueError, RuntimeError, error.URLError):
+                return self.send_json(503, {"health": "degraded", "source_mode": "unavailable", "new_decisions": False,
+                                           "task_backend": self.server.task_backend})
+            return self.send_json(200, {"health": "ok", "generated_at": result["generated_at"],
+                "source_mode": result["runtime_mode"], "task_backend": self.server.task_backend,
+                "districts": [{"district": row["district_id"], "priority_level": row["priority_band"],
+                               "suggested_action": row["action_label"]} for row in result["districts"]]})
 
         if path == "/api/health" and not parsed_path.query:
             if self.server.offline_fixture:  # type: ignore[attr-defined]
@@ -522,6 +675,8 @@ class GatewayHandler(SimpleHTTPRequestHandler):
             try:
                 result = self.load_result()
                 self.task_store.seed_result(result)
+            except CloudUnavailable:
+                raise
             except (
                 OSError,
                 ValueError,
@@ -546,7 +701,8 @@ class GatewayHandler(SimpleHTTPRequestHandler):
                 HTTPStatus.OK,
                 {
                     "ok": True,
-                    "service": "public_task_ledger",
+                    "service": "task_ledger",
+                    "task_backend": self.server.task_backend,
                     "task_count": len(
                         self.task_store.list_tasks()
                     ),
@@ -585,6 +741,7 @@ class GatewayHandler(SimpleHTTPRequestHandler):
                 {
                     "ok": True,
                     "task": task,
+                    "task_backend": self.server.task_backend,
                     "completion_url": self.completion_link(parts[3]) if task["status"] == "OPEN" else None,
                 },
             )
@@ -629,6 +786,10 @@ class GatewayHandler(SimpleHTTPRequestHandler):
             image.save(buffer)
             return self.send_svg(buffer.getvalue())
 
+        if len(parts) == 2 and parts[0] == "tasks" and re.fullmatch(r"task-[a-z0-9][a-z0-9-]{3,64}", parts[1]) and not parsed_path.query:
+            self.path = "/public_shell/task.html"
+            return super().do_GET()
+
         if path == "/public_shell/task.html":
             query = parse.parse_qs(
                 parsed_path.query,
@@ -668,6 +829,12 @@ class GatewayHandler(SimpleHTTPRequestHandler):
         )
 
     def do_POST(self) -> None:
+        try:
+            return self.handle_POST()
+        except CloudUnavailable:
+            return self.send_json(503, {"ok": False, "error": "cloud_task_service_unavailable", "task_backend": "cloud", "fallback": False})
+
+    def handle_POST(self) -> None:
         parsed_path = parse.urlparse(self.path)
         parts = [
             part
@@ -713,6 +880,12 @@ class GatewayHandler(SimpleHTTPRequestHandler):
             json.JSONDecodeError,
         ):
             status, body = self.task_store.reject(parts[3], None, "invalid_json")
+            return self.send_json(status, body)
+        try:
+            validate_task_event_request(payload)
+        except ValueError:
+            event_id = payload.get("event_id") if isinstance(payload, dict) else None
+            status, body = self.task_store.reject(parts[3], event_id, "event_schema_invalid")
             return self.send_json(status, body)
         status, response = self.task_store.apply_event(
             parts[3],
@@ -772,17 +945,25 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--task-db",
         type=Path,
-        required=True,
     )
     parser.add_argument(
-        "--public-base-url",
-        required=True,
+        "--public-task-base-url", "--public-base-url",
+        dest="public_base_url",
+        default=os.environ.get("PUBLIC_TASK_BASE_URL"),
     )
+    parser.add_argument("--task-backend", choices=("local", "cloud"), default=os.environ.get("TASK_BACKEND", "local"))
+    parser.add_argument("--task-cloud-url", default=os.environ.get("TASK_CLOUD_API_URL"))
+    parser.add_argument("--aws-session-dir", type=Path)
+    parser.add_argument("--aws-profile", default=os.environ.get("YOUBIKE_AWS_PROFILE"))
+    parser.add_argument("--aws-region", default=os.environ.get("YOUBIKE_AWS_REGION", YOUBIKE_RESOURCE_REGION))
     parser.add_argument(
         "--offline-fixture",
         type=Path,
     )
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.task_backend == "cloud" and not args.task_cloud_url:
+        args.task_cloud_url = args.public_base_url
+    return args
 
 
 def main() -> int:
@@ -794,19 +975,15 @@ def main() -> int:
         raise RuntimeError(
             "serve_directory_not_found"
         )
-    parsed_base = parse.urlparse(
-        args.public_base_url
-    )
-    if (
-        parsed_base.scheme not in {"http", "https"}
-        or not parsed_base.hostname
-        or parsed_base.username or parsed_base.password
-        or parsed_base.query or parsed_base.fragment
-        or parsed_base.path not in {"", "/"}
-    ):
-        raise ValueError(
-            "public_base_url_must_be_http_or_https_origin"
-        )
+    if not args.public_base_url:
+        raise ValueError("public_task_base_url_required")
+    public_base = validate_task_base(args.public_base_url, cloud=args.task_backend == "cloud")
+    if args.task_backend == "local" and not args.task_db:
+        raise ValueError("local_task_database_required")
+    if args.task_backend == "cloud" and (not args.task_cloud_url or not args.aws_profile):
+        raise ValueError("cloud_task_url_and_explicit_profile_required")
+    if args.task_backend == "cloud" and args.aws_region != YOUBIKE_RESOURCE_REGION:
+        raise ValueError("cloud_resource_region_must_be_us_west_2")
     fixture = (
         args.offline_fixture.resolve(strict=True)
         if args.offline_fixture
@@ -818,20 +995,18 @@ def main() -> int:
                 fixture.read_text(encoding="utf-8")
             )
         )
-    task_store = TaskStore(
-        args.task_db,
-        PROJECT_ROOT,
-    )
-    if fixture:
-        task_store.seed_result(
-            validate_sealed_result(
-                json.loads(
-                    fixture.read_text(
-                        encoding="utf-8"
-                    )
-                )
-            )
+    if args.task_backend == "cloud":
+        task_store = CloudTaskStore(
+            args.task_cloud_url,
+            public_base,
+            args.aws_session_dir,
+            args.aws_region,
+            args.aws_profile,
         )
+    else:
+        task_store = TaskStore(args.task_db, PROJECT_ROOT)
+        if fixture:
+            task_store.seed_result(validate_sealed_result(json.loads(fixture.read_text(encoding="utf-8"))))
     handler = (
         lambda *handler_args, **handler_kwargs:
         GatewayHandler(
@@ -844,6 +1019,7 @@ def main() -> int:
         (args.bind, args.port),
         handler,
     )
+    server.task_backend = args.task_backend
     server.task_store = task_store  # type: ignore[attr-defined]
     server.public_base_url = (  # type: ignore[attr-defined]
         args.public_base_url.rstrip("/")

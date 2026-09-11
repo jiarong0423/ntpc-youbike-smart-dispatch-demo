@@ -6,8 +6,8 @@
 
 - 顯示 29 個行政區的優先級、行動建議與安全轉換摘要
 - 從黑箱結果建立公開票單
-- 手機頁面以「完成任務」將 `OPEN` 原子更新為 `COMPLETED`
-- SQLite 事件簿具狀態轉移、事件去重與重啟保留
+- 手機頁面依序執行「接單 → 確認抵達 → 完成任務」；每一步各自留下冪等事件，未抵達不能將 `OPEN` 原子更新為 `COMPLETED`
+- 本機模式以 SQLite 保存事件；雲端模式由 AWS 任務 API 保存，兩者明確分離
 - 黑箱失效時 fail-closed，不拿舊資料冒充近期結果
 - 明確離線模式可完整展示 29 區安全轉換固定資料
 - 公開備查頁分開呈現 2026 年 1 至 9 月期間角色、近期批次與天氣特徵
@@ -19,7 +19,7 @@
 
 - 機車是快速先遣：先確認站點現況、滯留或待回補車輛、可操作空間與交接條件，不負責載運自行車。
 - 貨車是實際調度：確認需要補車或拔車後，才在合適時段搬運多輛自行車。
-- 兩種任務共用同一張 QR 派工單與狀態紀錄，保留完成事件與拒絕驗證紀錄。
+- 兩種任務共用同一張 QR 派工單與狀態紀錄，保留接單、抵達、完成事件與拒絕驗證紀錄。
 - 歷史快照建立區域基準，近期流入快照提取偏移，再產生動態區域調度。
 - 既有證據包含天氣、長假、觀光區及學區寒暑假週期的周轉變化，支援預備車、先遣確認與離峰順向發配。
 - 都市更新與新站快速增加會改變生活圈，因此新站先通過站點母體更新閥門，再重算區域平衡。
@@ -41,27 +41,49 @@
 
 ## Windows 比賽執行
 
-公開 GitHub 可在乾淨 Windows 上先跑離線模式。根目錄 `INSTALL_AND_RUN_WINDOWS.cmd` 會在 <code>%LOCALAPPDATA%\NTPCYouBikeVenue</code> 建立 venv 與 SQLite，不會把執行資料寫進 repo。有 `wheelhouse` 時採離線安裝，沒有時從 `requirements.txt` 安裝。
+公開 GitHub 的根目錄 `INSTALL_AND_RUN_WINDOWS.cmd` 在 <code>%LOCALAPPDATA%\NTPCYouBikeVenue</code> 建立 Python runtime。有 `wheelhouse` 時採離線安裝，沒有時從 `requirements.txt` 安裝。啟動模式決定結果來源，`TASK_BACKEND` 決定任務儲存位置；兩者分開設定。
 
-公開版離線啟動：
+**本機／會場模式**：手機與電腦使用同一個 Wi-Fi，首次執行：
 
-    INSTALL_AND_RUN_WINDOWS.cmd offline 127.0.0.1
+```cmd
+INSTALL_AND_RUN_WINDOWS.cmd offline
+```
 
-會場私有包另含短效憑證與本機黑箱；公開 GitHub 不會建立或攜帶這些內容。
+啟動器會找出 Windows 可用的 IPv4，排除 loopback、APIPA 與未就緒位址。只有一個候選時才自動採用；找不到或有多個網卡時顯示候選並停止，請選定手機可達的位址再傳入 `[LAN-IP]`。不會自動產生指向手機 localhost 的 QR。已設定的 `PUBLIC_TASK_BASE_URL` 優先保留，其次是明確傳入的 LAN-IP 或既有 `PUBLIC_HOST`。
 
-會場包黑箱近即時連線模式：
+```cmd
+public_shell\start_windows.cmd offline [LAN-IP]
+```
 
-    INSTALL_AND_RUN_WINDOWS.cmd live 192.168.1.10
+`[LAN-IP]` 必須換成展示電腦實際位址。首次安裝也可傳入相同第二個參數。runtime 產生的 QR 指向 `http://[LAN-IP]:8084/tasks/{task_id}`；手機必須在相同網路且 Windows 防火牆允許 TCP 8084。VPN／虛擬網卡造成多個候選時，需要明確選擇，不猜測路由。本機 LAN HTTP 使用伺服器簽發且綁定任務的短效 grant 完成任務；這是本機示範授權，不是硬體身分驗證。
 
-明確離線展示：
+**AWS 雲端任務模式**：先由負責部署的人提供真實 HTTPS URL，再於同一個 Windows CMD 設定：
 
-    public_shell\start_windows.cmd offline 192.168.1.10
+```cmd
+set "TASK_BACKEND=cloud"
+set "PUBLIC_TASK_BASE_URL=https://example.execute-api.us-west-2.amazonaws.com/demo"
+set "YOUBIKE_AWS_PROFILE=vibegate-dev"
+set "YOUBIKE_AWS_REGION=us-west-2"
+INSTALL_AND_RUN_WINDOWS.cmd offline
+```
 
-其中 <code>192.168.1.10</code> 是展示電腦接 WF2419 LAN 的固定 IP。手機連同一個 <code>soong-demo</code> Wi-Fi 後開啟：
+上述網域是佔位範例，必須替換；URL 可保留 API Gateway stage 前綴。雲端模式的 QR 指向 AWS HTTPS `/tasks/{task_id}`，手機可透過 4G／5G 存取，不依賴展示電腦 LAN。`TASK_CLOUD_API_URL` 可另設 AWS API base，未設定則沿用 `PUBLIC_TASK_BASE_URL`。BFF 必須明確收到 `YOUBIKE_AWS_PROFILE`，本次 rehearsal 使用既有全域 profile `vibegate-dev`；它只為 `us-west-2` 的 YouBike API 匯出短效憑證。公開設定範本 [PUBLIC_RUNTIME_CONFIG.example.cmd](PUBLIC_RUNTIME_CONFIG.example.cmd) 只列非秘密選項，不包含金鑰或 session，也不會自動載入。
 
-    http://192.168.1.10:8084
+雲端模式不建立本機 SQLite 任務庫；AWS 不可用時回報失敗，不切回本機任務成功。離線固定資料仍只能標示為非即時，即使任務寫入雲端也不能改稱近即時。真實黑箱結果需要私有會場包與短效憑證，改以 `live` 啟動；沒有黑箱、憑證或來源新鮮度證據時直接停止或顯示服務中斷。
 
-離線模式只使用 29 區安全轉換固定資料，畫面必須標示非即時。黑箱連線模式只有在來源時間、新鮮度與契約都通過時才稱近即時；沒有私有黑箱或憑證時會直接停止或顯示服務中斷。
+```mermaid
+flowchart LR
+  SOURCE["offline fixture or private live black box"] --> BFF["Windows BFF"]
+  BFF --> MODE{"TASK_BACKEND"}
+  MODE -->|local| DB["Local SQLite outside repo"]
+  MODE -->|cloud| AWS["AWS HTTPS API / DynamoDB"]
+  DB --> LAN["LAN QR /tasks/id"]
+  AWS --> CELL["HTTPS QR /tasks/id"]
+  LAN --> WIFI["Phone on same Wi-Fi"]
+  CELL --> PHONE["Phone on 4G / 5G"]
+```
+
+圖中的雲端連線需部署與驗證後才能視為可用；程式契約與本機測試不代表 S513E、手機或 AWS 實測完成。
 
 ## 本機測試
 
@@ -82,7 +104,7 @@ Windows：
       --output-dir %LOCALAPPDATA%\NTPCYouBikeVenue\bedrock ^
       --session-dir %LOCALAPPDATA%\NTPCYouBikeVenue\aws
 
-只有操作員加上 <code>--allow-paid-inference</code> 才會呼叫一次 Amazon Bedrock Converse。YouBike 必須使用獨立的 <code>youbike-hackathon</code> profile；程式會拒絕已提交 V-Gate 專案使用的 profile。
+只有操作員加上 <code>--allow-paid-inference</code> 才會呼叫一次 Amazon Bedrock Converse。既有 adapter 的 forbidden-profile 邊界不變，會拒絕 `vibegate-dev`；本次 task BFF 使用該 profile 時，Bedrock 必須保持停用，或另行提供不在禁止清單中的獨立 profile，不能共用或繞過檢查。
 
 ## 公開限制
 
@@ -90,10 +112,10 @@ Windows：
 
 ## 任務完成與雲端驗證邊界
 
-本機任務使用短效簽章（300 秒）、任務別、事件時間與匿名短期加鹽雜湊；相同事件重送不重複更新，驗證失敗只追加拒絕紀錄。簽章放在網址 fragment，不寫入存取日誌。瀏覽器不保存原始裝置識別資訊。
+本機任務使用短效簽章（300 秒）、任務別、事件時間與每次授權的匿名短期加鹽雜湊。流程依序為掃碼、接單、確認抵達、完成；未接單不能抵達，未抵達不能完成。異常事件只寫稽核事件，不推進 `accepted_at`、`arrived_at` 或完成狀態。相同事件重送不重複更新，取消確認不送事件，驗證失敗只追加拒絕紀錄。簽章放在網址 fragment，不寫入存取日誌。瀏覽器不保存原始裝置識別資訊。
 
-本機簽章是公開示範能力，不能當作正式雲端操作者授權。服務重啟會使舊 QR 失效，請重新開啟任務頁產生 QR。任務完成狀態保留在 SQLite。既有舊版任務庫不會自動遷移；請保留舊庫並使用新的外部 runtime 路徑，另行審核遷移。
+本機簽章是公開示範能力，不能當作正式雲端操作者授權。服務重啟會使舊 QR 失效，請重新開啟任務頁產生 QR。接單、抵達時間與任務完成狀態保留在 SQLite。Schema v3 任務庫不會在啟動時自動修改；停止服務後，必須明確指定來源與全新備份位置執行 `python public_shell/task_ledger.py migrate-v3-to-v4 --database [DB_PATH] --backup [BACKUP_PATH]`。遷移先建立並驗證 v3 備份，再加入 nullable `arrived_at` 並升級為 v4；既有已完成任務不會被偽造抵達時間。
 
-完成按鈕需要 HTTPS 或 localhost 安全環境；一般 LAN HTTP 僅能查看，不能完成任務。手機 4G/5G 的固定 HTTPS QR 必須等待 AWS 部署，不能使用電腦的 localhost 或私人 LAN 位址。
+本機 LAN HTTP 可使用簽章內綁定的每次授權匿名值完成任務，前端不依賴 `crypto.subtle`。匿名值不是裝置指紋；簽章過期或驗證失敗時不改變狀態。手機 4G/5G 的固定 HTTPS QR 使用 `PUBLIC_TASK_BASE_URL` 指向部署後的 AWS URL；完成部署與實測前仍不可標成可用。
 
-AWS API Gateway、Lambda、DynamoDB 與 Google Sheets 鏡像目前是待部署架構。本機頁面顯示「本機帳本」成功不代表 AWS 已更新。Windows CI、S513E 實機、手機行動網路與 Bedrock 真實呼叫應各自保留驗證結果。
+AWS API Gateway、Lambda、DynamoDB 與 Google Sheets 鏡像目前是待部署架構。本機頁面顯示「本機帳本」成功不代表 AWS 已更新；雲端模式不建立 SQLite，也不將 API 錯誤降級成本機成功。Windows CI、S513E 實機、手機行動網路與 Bedrock 真實呼叫應各自保留驗證結果。

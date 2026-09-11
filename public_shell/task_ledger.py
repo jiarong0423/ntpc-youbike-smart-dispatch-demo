@@ -3,18 +3,19 @@
 
 from __future__ import annotations
 
+import argparse
+import base64
 from contextlib import closing
 from datetime import datetime, timezone
 from http import HTTPStatus
 from pathlib import Path
-import re
-import base64
 import hashlib
 import hmac
 import json
+import re
 import secrets
-import time
 import sqlite3
+import time
 from typing import Any
 
 TASK_ID_RE = re.compile(r"^task-[a-z0-9][a-z0-9-]{3,64}$")
@@ -23,7 +24,36 @@ TASK_TYPES = {"add_bikes", "pull_bikes", "observe", "rebalance_window"}
 QR_TTL_SECONDS = 300
 EVENT_MAX_AGE_SECONDS = 300
 FUTURE_SKEW_SECONDS = 30
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 4
+
+V3_REQUIRED_COLUMNS = {
+    "task": {"task_id", "case_id", "display_name", "district_id", "action_label", "priority_band", "route_label", "eta_band", "status", "accepted_at", "source_package_id", "created_at", "updated_at"},
+    "task_event": {"event_id", "task_id", "event_type", "request_hash", "status_before", "status_after", "created_at"},
+    "task_attempt": {"attempt_id", "task_id", "event_id", "error_code", "created_at"},
+}
+V4_REQUIRED_COLUMNS = {
+    **V3_REQUIRED_COLUMNS,
+    "task": V3_REQUIRED_COLUMNS["task"] | {"arrived_at"},
+}
+
+
+def _external_path(path: Path, project_root: Path, error: str) -> Path:
+    resolved = path.expanduser().resolve()
+    root = project_root.resolve()
+    if resolved == root or root in resolved.parents:
+        raise ValueError(error)
+    return resolved
+
+
+def _validate_schema(conn: sqlite3.Connection, version: int, required_columns: dict[str, set[str]]) -> None:
+    if conn.execute("PRAGMA user_version").fetchone()[0] != version:
+        raise ValueError("task_database_schema_requires_explicit_migration")
+    for table, columns in required_columns.items():
+        actual = {row[1] for row in conn.execute("PRAGMA table_info(" + table + ")")}
+        if actual != columns:
+            raise ValueError("task_database_schema_requires_explicit_migration")
+    if conn.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+        raise ValueError("task_database_integrity_failed")
 
 
 def canonical(payload: Any) -> bytes:
@@ -32,29 +62,14 @@ def canonical(payload: Any) -> bytes:
 
 class TaskStore:
     def __init__(self, path: Path, project_root: Path, *, signing_key: bytes | None = None) -> None:
-        self.path = path.expanduser().resolve()
-        root = project_root.resolve()
-        if self.path == root or root in self.path.parents:
-            raise ValueError("task_database_must_be_outside_project")
+        self.path = _external_path(path, project_root, "task_database_must_be_outside_project")
         self.signing_key = signing_key if signing_key is not None else secrets.token_bytes(32)
         if len(self.signing_key) < 32:
             raise ValueError("signing_key_too_short")
         existing_database = self.path.exists()
         if existing_database:
             with closing(sqlite3.connect(self.path.as_uri() + "?mode=ro", uri=True)) as conn:
-                if conn.execute("PRAGMA user_version").fetchone()[0] != SCHEMA_VERSION:
-                    raise ValueError("task_database_schema_requires_explicit_migration")
-                required_columns = {
-                    "task": {"task_id", "case_id", "display_name", "district_id", "action_label", "priority_band", "route_label", "eta_band", "status", "source_package_id", "created_at", "updated_at"},
-                    "task_event": {"event_id", "task_id", "event_type", "request_hash", "status_before", "status_after", "created_at"},
-                    "task_attempt": {"attempt_id", "task_id", "event_id", "error_code", "created_at"},
-                }
-                for table, columns in required_columns.items():
-                    actual = {row[1] for row in conn.execute("PRAGMA table_info(" + table + ")")}
-                    if actual != columns:
-                        raise ValueError("task_database_schema_requires_explicit_migration")
-                if conn.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
-                    raise ValueError("task_database_integrity_failed")
+                _validate_schema(conn, SCHEMA_VERSION, V4_REQUIRED_COLUMNS)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         if not existing_database:
             self._init_schema()
@@ -81,6 +96,8 @@ class TaskStore:
                     route_label TEXT NOT NULL,
                     eta_band TEXT NOT NULL,
                     status TEXT NOT NULL,
+                    accepted_at TEXT,
+                    arrived_at TEXT,
                     source_package_id TEXT NOT NULL,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
@@ -101,7 +118,7 @@ class TaskStore:
                     error_code TEXT NOT NULL,
                     created_at TEXT NOT NULL
                 );
-                PRAGMA user_version = 2;
+                PRAGMA user_version = 4;
                 CREATE INDEX IF NOT EXISTS idx_task_event_task
                     ON task_event(task_id, created_at);
                 """
@@ -120,6 +137,10 @@ class TaskStore:
             "route_label": row["route_label"],
             "eta_band": row["eta_band"],
             "status": row["status"],
+            "accepted": row["accepted_at"] is not None,
+            "accepted_at": row["accepted_at"],
+            "arrived": row["arrived_at"] is not None,
+            "arrived_at": row["arrived_at"],
             "task_type": row["action_label"],
             "updated_at": row["updated_at"],
         }
@@ -145,6 +166,8 @@ class TaskStore:
                     str(handoff.get("label", "route"))[:80],
                     str(handoff.get("eta_band", "none"))[:24],
                     "OPEN",
+                    None,
+                    None,
                     result["package_id"],
                     now,
                     now,
@@ -155,9 +178,9 @@ class TaskStore:
                 """
                 INSERT INTO task (
                     task_id, case_id, display_name, district_id, action_label,
-                    priority_band, route_label, eta_band, status,
+                    priority_band, route_label, eta_band, status, accepted_at, arrived_at,
                     source_package_id, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(case_id) DO UPDATE SET
                     display_name=excluded.display_name,
                     district_id=excluded.district_id,
@@ -198,11 +221,12 @@ class TaskStore:
         claims = {"task_id": task_id, "task_type": task["task_type"],
                   "issued_at": issued, "expires_at": issued + QR_TTL_SECONDS,
                   "device_salt": secrets.token_hex(16)}
+        claims["device_hash"] = hashlib.sha256((claims["device_salt"] + secrets.token_hex(32)).encode()).hexdigest()
         encoded = base64.urlsafe_b64encode(canonical(claims)).decode().rstrip("=")
         digest = hmac.new(self.signing_key, encoded.encode(), hashlib.sha256).hexdigest()
         return {**claims, "signature": encoded + "." + digest}
 
-    def _verify_signature(self, token: str, task_id: str, task_type: str, now: float) -> bool:
+    def _verify_signature(self, token: str, task_id: str, task_type: str, now: float, device_hash: str) -> bool:
         try:
             encoded, digest = token.split(".")
             expected = hmac.new(self.signing_key, encoded.encode(), hashlib.sha256).hexdigest()
@@ -210,6 +234,7 @@ class TaskStore:
                 return False
             claims = json.loads(base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4)))
             return (claims["task_id"] == task_id and claims["task_type"] == task_type
+                    and hmac.compare_digest(claims["device_hash"], device_hash)
                     and claims["issued_at"] <= now + FUTURE_SKEW_SECONDS
                     and now < claims["expires_at"]
                     and claims["expires_at"] - claims["issued_at"] == QR_TTL_SECONDS)
@@ -232,9 +257,11 @@ class TaskStore:
 
     def apply_event(self, task_id: str, payload: Any) -> tuple[int, dict[str, Any]]:
         event_id = payload.get("event_id") if isinstance(payload, dict) else None
-        required = {"task_id", "task_type", "event_id", "device_hash", "signature", "occurred_at"}
+        required = {"task_id", "task_type", "event_id", "device_hash", "signature", "occurred_at", "event_type"}
         if not TASK_ID_RE.fullmatch(task_id) or not isinstance(payload, dict) or set(payload) != required:
             return self.reject(task_id, event_id, "event_fields_invalid")
+        if payload.get("event_type") not in {"accept", "arrive", "complete", "exception"}:
+            return self.reject(task_id, event_id, "event_type_invalid")
         if (not all(isinstance(v, str) for v in payload.values())
                 or not EVENT_ID_RE.fullmatch(event_id)
                 or payload["task_id"] != task_id
@@ -252,13 +279,13 @@ class TaskStore:
                 raise ValueError("time_out_of_range")
         except (ValueError, OverflowError):
             return self.reject(task_id, event_id, "event_time_invalid")
-        if not self._verify_signature(payload["signature"], task_id, payload["task_type"], now):
+        if not self._verify_signature(payload["signature"], task_id, payload["task_type"], now, payload["device_hash"]):
             return self.reject(task_id, event_id, "signature_invalid_or_expired", 403)
         request_hash = hashlib.sha256(canonical(payload)).hexdigest()
         timestamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
         with closing(self.connect()) as conn:
             conn.execute("BEGIN IMMEDIATE")
-            if not self._verify_signature(payload["signature"], task_id, payload["task_type"], time.time()):
+            if not self._verify_signature(payload["signature"], task_id, payload["task_type"], time.time(), payload["device_hash"]):
                 return self.reject(task_id, event_id, "signature_invalid_or_expired", 403, conn=conn)
             row = conn.execute("SELECT * FROM task WHERE task_id=?", (task_id,)).fetchone()
             if not row:
@@ -270,9 +297,46 @@ class TaskStore:
                 if existing["task_id"] != task_id or existing["request_hash"] != request_hash:
                     return self.reject(task_id, event_id, "event_id_conflict", 409, conn=conn)
                 conn.rollback()
-                return 200, {"ok": True, "duplicate": True, "task": self.public_task(row)}
+                return 200, {"ok": True, "duplicate": True, "audit_only": existing["event_type"] == "exception", "task": self.public_task(row)}
             if row["status"] != "OPEN":
                 return self.reject(task_id, event_id, "invalid_transition", 409, conn=conn)
+            if payload.get("event_type") == "accept":
+                if row["accepted_at"] is not None:
+                    return self.reject(task_id, event_id, "task_already_accepted", 409, conn=conn)
+                changed = conn.execute(
+                    "UPDATE task SET accepted_at=?, updated_at=? WHERE task_id=? AND status='OPEN' AND accepted_at IS NULL",
+                    (timestamp, timestamp, task_id),
+                )
+                if changed.rowcount != 1:
+                    return self.reject(task_id, event_id, "task_already_accepted", 409, conn=conn)
+                conn.execute("INSERT INTO task_event VALUES (?,?,?,?,?,?,?)",
+                             (event_id, task_id, "accept", request_hash, "OPEN", "OPEN", timestamp))
+                updated = conn.execute("SELECT * FROM task WHERE task_id=?", (task_id,)).fetchone()
+                conn.commit()
+                return 200, {"ok": True, "duplicate": False, "accepted": True, "task": self.public_task(updated)}
+            if row["accepted_at"] is None:
+                return self.reject(task_id, event_id, "task_not_accepted", 409, conn=conn)
+            if payload.get("event_type") == "exception":
+                conn.execute("INSERT INTO task_event VALUES (?,?,?,?,?,?,?)",
+                             (event_id, task_id, "exception", request_hash, "OPEN", "OPEN", timestamp))
+                conn.commit()
+                return 200, {"ok": True, "duplicate": False, "audit_only": True, "task": self.public_task(row)}
+            if payload.get("event_type") == "arrive":
+                if row["arrived_at"] is not None:
+                    return self.reject(task_id, event_id, "task_already_arrived", 409, conn=conn)
+                changed = conn.execute(
+                    "UPDATE task SET arrived_at=?, updated_at=? WHERE task_id=? AND status='OPEN' AND accepted_at IS NOT NULL AND arrived_at IS NULL",
+                    (timestamp, timestamp, task_id),
+                )
+                if changed.rowcount != 1:
+                    return self.reject(task_id, event_id, "task_already_arrived", 409, conn=conn)
+                conn.execute("INSERT INTO task_event VALUES (?,?,?,?,?,?,?)",
+                             (event_id, task_id, "arrive", request_hash, "OPEN", "OPEN", timestamp))
+                updated = conn.execute("SELECT * FROM task WHERE task_id=?", (task_id,)).fetchone()
+                conn.commit()
+                return 200, {"ok": True, "duplicate": False, "arrived": True, "task": self.public_task(updated)}
+            if row["arrived_at"] is None:
+                return self.reject(task_id, event_id, "task_not_arrived", 409, conn=conn)
             changed = conn.execute("UPDATE task SET status='COMPLETED', updated_at=? WHERE task_id=? AND status='OPEN'", (timestamp, task_id))
             if changed.rowcount != 1:
                 return self.reject(task_id, event_id, "invalid_transition", 409, conn=conn)
@@ -281,3 +345,57 @@ class TaskStore:
             updated = conn.execute("SELECT * FROM task WHERE task_id=?", (task_id,)).fetchone()
             conn.commit()
         return 200, {"ok": True, "duplicate": False, "task": self.public_task(updated)}
+
+    @classmethod
+    def migrate_v3_to_v4(cls, path: Path, project_root: Path, backup_path: Path) -> Path:
+        source = _external_path(path, project_root, "task_database_must_be_outside_project")
+        backup = _external_path(backup_path, project_root, "task_database_backup_must_be_outside_project")
+        if source == backup:
+            raise ValueError("task_database_backup_must_differ")
+        if not source.is_file():
+            raise ValueError("task_database_missing")
+        if backup.exists():
+            raise ValueError("task_database_backup_exists")
+        backup.parent.mkdir(parents=True, exist_ok=True)
+        with closing(sqlite3.connect(source.as_uri() + "?mode=ro", uri=True)) as existing:
+            _validate_schema(existing, 3, V3_REQUIRED_COLUMNS)
+            with closing(sqlite3.connect(backup)) as destination:
+                existing.backup(destination)
+        with closing(sqlite3.connect(backup.as_uri() + "?mode=ro", uri=True)) as saved:
+            _validate_schema(saved, 3, V3_REQUIRED_COLUMNS)
+        with closing(sqlite3.connect(source, timeout=10)) as conn:
+            try:
+                conn.execute("BEGIN EXCLUSIVE")
+                _validate_schema(conn, 3, V3_REQUIRED_COLUMNS)
+                conn.execute("ALTER TABLE task ADD COLUMN arrived_at TEXT")
+                conn.execute("PRAGMA user_version = 4")
+                _validate_schema(conn, 4, V4_REQUIRED_COLUMNS)
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+        with closing(sqlite3.connect(source.as_uri() + "?mode=ro", uri=True)) as migrated:
+            _validate_schema(migrated, 4, V4_REQUIRED_COLUMNS)
+        return backup
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Explicit migration for the public task ledger")
+    subparsers = parser.add_subparsers(dest="command", required=True)
+    migrate = subparsers.add_parser("migrate-v3-to-v4")
+    migrate.add_argument("--database", type=Path, required=True)
+    migrate.add_argument("--backup", type=Path, required=True)
+    args = parser.parse_args(argv)
+    if args.command != "migrate-v3-to-v4":
+        parser.error("unsupported command")
+    backup = TaskStore.migrate_v3_to_v4(
+        args.database,
+        Path(__file__).resolve().parents[1],
+        args.backup,
+    )
+    print(json.dumps({"ok": True, "schema_version": 4, "backup": str(backup)}, sort_keys=True))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

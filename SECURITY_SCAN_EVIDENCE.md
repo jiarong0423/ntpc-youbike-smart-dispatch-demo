@@ -8,7 +8,7 @@ Scope: PUBLIC_EXPORT_MANIFEST.json allowlisted files
 
 - Python and JavaScript syntax checks: PASS
 - Playwright responsive visual smoke: PASS on 1440x900 and 390x844
-- Unit and integration tests: 37 passed on Python 3.12 and 3.13
+- Unit and integration tests: 66 passed locally; current Windows Python 3.11, 3.12 and 3.13 Actions are required after the release commit
 - LocalGuard development safety gate: 2 reviewed medium findings, 0 blocking
 - AI Security export gate: PASS, 0 blocking
 - Release boundary safety gate: 0 findings, 0 blocking

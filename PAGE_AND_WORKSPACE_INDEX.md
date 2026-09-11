@@ -5,13 +5,19 @@
 | Workspace | Entry point | Responsible component | Input | Executable action | Output and evidence |
 | --- | --- | --- | --- | --- | --- |
 | Dispatch workspace | `/public_shell/index.html` | Browser UI plus same-origin BFF | Contract-valid black-box result or operator-selected offline fixture | Review 29 districts, priority bands and active tasks | Visible mode, source time, freshness state and case count |
-| Task pool jump | `Open task` in the dispatch workspace | `public_shell/app.js` | Selected `case_id` | Convert the case to a stable `task_id` and open its task URL | `/public_shell/task.html?task_id=...` |
-| Task handoff | `/public_shell/task.html?task_id=...` | Task page plus SQLite task ledger | One validated `task_id` | Complete task: OPEN to COMPLETED | Append-only task events, current state and duplicate-event protection |
-| QR handoff | `/api/handoff/tasks/{task_id}/qr.svg` | Same-origin BFF | Existing `task_id` and configured public base URL | Generate a QR code for the same task page | Phone opens the exact task URL; no official bicycle unlock function |
+| Task pool jump | `Open task` in the dispatch workspace | `public_shell/app.js` | Selected `case_id` | Convert the case to a stable `task_id` and open its task URL | `/tasks/{task_id}` |
+| Task handoff | `/tasks/{task_id}` | Task page plus selected local/cloud authority | One validated `task_id` | Scan, accept, confirm arrival, then complete: OPEN to COMPLETED | Append-only accept/arrive/exception/complete events, accepted and arrived times, current state and duplicate-event protection |
+| QR handoff | `/api/handoff/tasks/{task_id}/qr.svg` | Same-origin BFF | Existing `task_id` and `PUBLIC_TASK_BASE_URL` | Generate local LAN or AWS HTTPS `/tasks/{task_id}` QR | Phone opens the exact task URL; no official bicycle unlock function |
 | Evidence layer | `index.html` section `Data evidence` | Static public evidence assets | Fixed public summaries | Review historical coverage, recent batches, weather and operating cases | Versioned SVG summaries with explicit publication limits |
 | Live result boundary | `/api/blackbox/result` | Same-origin BFF | Authenticated response from `127.0.0.1:8781` | Validate schema, result time, source time, credential expiry and integrity hash | Near-real-time result only after every gate passes; otherwise fail-closed |
 | Offline workflow | `/public_shell/index.html?mode=offline` | Same-origin BFF | `fixtures/sealed.json` | Run the full display and task workflow without the private engine | Fixed safe-transformed demo, visibly marked non-realtime |
 | Bedrock explanation | `public_shell/bedrock_explainer_adapter.py` | Server-side adapter | Sanitized district bands and action counts | Create an operator-readable explanation | Request/response evidence without changing dispatch decisions |
+
+## Windows Configuration Boundary
+
+`INSTALL_AND_RUN_WINDOWS.cmd` installs the external runtime, then calls `public_shell/start_windows.cmd`. The launcher preserves explicit `PUBLIC_TASK_BASE_URL`, accepts `[LAN-IP]` for local mode, and otherwise requires exactly one usable Windows IPv4. Missing or multiple candidates stop startup with an override instruction. `TASK_BACKEND=cloud` requires an AWS HTTPS task base, an explicit `YOUBIKE_AWS_PROFILE`, and `YOUBIKE_AWS_REGION=us-west-2`; it may use the existing global AWS CLI profile and never starts a local SQLite task ledger. `PUBLIC_RUNTIME_CONFIG.example.cmd` is a nonsecret reference, not an automatically loaded credential file.
+
+Local QR is reachable only on the same network. Cloud QR is independent of the venue LAN after deployment and phone-network verification. Static path tests and mocked PowerShell detection tests do not establish Windows S513E or phone acceptance.
 
 ## Responsibility Split
 
@@ -46,6 +52,6 @@
 2. Review the district priority and the recommended response class.
 3. Open a task from the task pool.
 4. Display or scan `/api/handoff/tasks/{task_id}/qr.svg`.
-5. On the task page, press 完成任務; confirm COMPLETED, then verify a repeated event cannot update it again.
+5. On the task page, press 接單 and verify the accepted state. Press 確認抵達 and verify the arrived state while the task remains OPEN. Then press 完成任務, confirm COMPLETED, and verify a repeated event cannot update it again. Cancelling any confirmation must not send an event; exception reporting must not advance the task.
 6. Return to the dispatch workspace and show the evidence layer.
 7. Run the Bedrock adapter separately to demonstrate explanation without changing the decision.

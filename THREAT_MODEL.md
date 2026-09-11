@@ -24,7 +24,7 @@ Reviewed 2026-09-10.
 | Algorithm disclosure | Private source, binary or formulas enter Git | Public and private trees are mixed | Exact export manifest and private black-box interface |
 | Raw data or personal data release | Snapshots or runtime DB enter package | Broad recursive copy or Git staging | Allowlisted export, Git ignores and explicit privacy scan |
 | Stale result shown as realtime | Automatic fallback after black-box failure | Availability prioritized over provenance | Live mode fails closed; offline mode is explicit |
-| Duplicate or invalid task transition | Phone retries or actions arrive out of order | No idempotency or state machine | Unique event IDs and server-side transition table |
+| Duplicate or invalid task transition | Phone retries, skips arrival or sends actions out of order | No idempotency or explicit arrival state | Unique event IDs and server-side accept → arrive → complete transition table; exceptions remain audit-only |
 | AWS cross-project contamination | Existing submitted profile is reused | Shared credentials and session directory | Dedicated YouBike profile and explicit V-Gate profile rejection |
 | Cloud disclosure | Raw rows or algorithm fields enter Bedrock prompt | Model call built from internal objects | Strict sanitized schema, small payload and denied-field checks |
 | Runtime data enters Git | SQLite is created under repository | Working directory is treated as data directory | Runtime path must be outside repository |

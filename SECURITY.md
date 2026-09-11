@@ -23,7 +23,7 @@
 - Offline fixture use is an explicit server option.
 - Credentials must be outside the repository and never reach the browser.
 - Task event fields use strict allowlists and short-lived salted random device hashes.
-- Event IDs are idempotency keys; invalid status transitions are rejected.
+- Event IDs are idempotency keys; the server enforces accept → arrive → complete and rejects skipped or reordered transitions. Exception events are audit-only.
 - Bedrock payloads are schema validated and reject station, coordinate, identity and algorithm fields.
 - The V-Gate AWS profile is explicitly rejected and remains frozen.
 - Runtime SQLite, logs, AWS files and environment files are ignored by Git.
@@ -34,7 +34,7 @@ Do not submit secrets or private data in a public issue. Report a security conce
 
 ## Local Completion Capability
 
-Local demo QR capabilities expire after 300 seconds and are invalidated by process restart. They are held in URL fragments and excluded from access logs. The backend stores a request digest and safe rejection metadata, not raw fingerprints, addresses or signatures. SQLite schema upgrades require explicit review; old ledgers are not migrated by startup.
+Local demo QR capabilities expire after 300 seconds and are invalidated by process restart. They are held in URL fragments and excluded from access logs. The backend stores a request digest and safe rejection metadata, not raw fingerprints, addresses or signatures. SQLite schema upgrades require an explicit offline migration with a separately verified backup; old ledgers are rejected by startup and never modified silently.
 
 The public local task-detail endpoint issues demo completion capabilities. It is not an authenticated operator endpoint and must not be deployed as a cloud task publisher. The AWS implementation requires a separate authenticated publication route, throttling and budget controls before release.
 

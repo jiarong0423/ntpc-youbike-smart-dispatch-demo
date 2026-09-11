@@ -1,12 +1,16 @@
 (function () {
   "use strict";
-  const taskId = new URLSearchParams(window.location.search).get("task_id") || "";
-  const taskPath = "../api/handoff/tasks/" + encodeURIComponent(taskId);
+  const taskId = new URLSearchParams(window.location.search).get("task_id") || (window.location.pathname.match(/\/tasks\/(task-[a-z0-9-]+)$/) || [])[1] || "";
+  const taskPath = "/api/handoff/tasks/" + encodeURIComponent(taskId);
   const originalGrant = new URLSearchParams(window.location.hash.slice(1));
   let grant = originalGrant.has("signature") ? originalGrant : null;
   let pendingEvent = null;
   let currentTask = null;
   let busy = false;
+  let backend = "local";
+  const acceptButton = document.querySelector('[data-event="accept"]');
+  const arriveButton = document.querySelector('[data-event="arrive"]');
+  const reportButton = document.querySelector('[data-event="exception"]');
   const button = document.querySelector('[data-event="complete"]');
   const message = document.getElementById("message");
   function showMessage(text, error) {
@@ -16,14 +20,26 @@
   function render(task) {
     currentTask = task;
     const badge = document.getElementById("status-badge");
-    badge.textContent = {OPEN: "待完成", COMPLETED: "已完成"}[task.status] || task.status;
-    badge.dataset.status = task.status;
+    const displayStatus = task.status === "COMPLETED" ? "COMPLETED" : task.arrived ? "ARRIVED" : task.accepted ? "ACCEPTED" : "OPEN";
+    badge.textContent = {OPEN: "待接單", ACCEPTED: "已接單", ARRIVED: "已抵達", COMPLETED: "已完成"}[displayStatus] || displayStatus;
+    badge.dataset.status = displayStatus;
     for (const [id, value] of Object.entries({
       "task-name": task.display_name, "task-district": task.district_id,
       "task-action": {add_bikes: "補車", pull_bikes: "拔車", observe: "觀察", rebalance_window: "調度窗口"}[task.action_label],
       "task-route": task.route_label + " / " + task.eta_band, "task-updated": task.updated_at
     })) document.getElementById(id).textContent = value;
-    button.disabled = busy || task.status !== "OPEN" || !grant;
+    const unavailable = busy || task.status !== "OPEN" || !grant;
+    acceptButton.disabled = unavailable || task.accepted;
+    arriveButton.disabled = unavailable || !task.accepted || task.arrived;
+    button.disabled = unavailable || !task.arrived;
+    reportButton.disabled = unavailable || !task.accepted;
+    document.getElementById("workflow-notice").textContent = task.status === "COMPLETED"
+      ? "任務已完成，帳本已留存完成事件。"
+      : task.arrived
+        ? "已抵達現場。完成實際作業後才能確認任務完成；異常仍只寫入稽核紀錄。"
+        : task.accepted
+          ? "已接單。抵達現場後請先確認到站，或回報執行異常。"
+          : "請先接單，抵達現場後確認到站，再完成任務。";
     if (task.status === "COMPLETED") document.getElementById("task-qr").hidden = true;
   }
   async function loadTask() {
@@ -31,53 +47,86 @@
     const response = await fetch(taskPath, {cache: "no-store"});
     const payload = await response.json();
     if (!response.ok || !payload.ok) throw new Error("任務不存在或服務未啟動");
-    if (!grant && payload.completion_url) {
-      grant = new URLSearchParams(new URL(payload.completion_url).hash.slice(1));
+    backend = payload.task_backend || backend;
+    let completionURL = null;
+    if (payload.completion_url) {
+      completionURL = new URL(payload.completion_url);
+      const validProtocol = backend === "cloud" ? completionURL.protocol === "https:" : ["http:", "https:"].includes(completionURL.protocol);
+      if (!validProtocol || completionURL.username || completionURL.password || completionURL.search ||
+          !completionURL.pathname.endsWith("/tasks/" + encodeURIComponent(taskId)) || !completionURL.hash) {
+        throw new Error("任務網址不符合安全契約");
+      }
+      if (!grant) grant = new URLSearchParams(completionURL.hash.slice(1));
     }
+    document.getElementById("runtime-notice").textContent = backend === "cloud" ? "雲端 AWS 任務帳本；連線失敗不轉寫本機。" : "目前為離線本機任務帳本；此結果不代表 AWS 已同步。";
     render(payload.task);
-    if (grant && payload.task.status === "OPEN") {
-      const target = window.location.origin + "/public_shell/task.html?task_id=" + encodeURIComponent(taskId) + "#" + grant.toString();
-      document.getElementById("task-link").href = target;
+    if (grant && completionURL && payload.task.status === "OPEN") {
+      document.getElementById("task-link").href = completionURL.href;
       document.getElementById("task-qr").src = taskPath + "/qr.svg";
     }
   }
-  async function createEvent() {
-    if (!window.crypto || !crypto.subtle) throw new Error("完成任務需要 HTTPS 或本機安全連線。");
+  async function createEvent(eventType) {
+    if (!window.crypto || !crypto.getRandomValues) throw new Error("此瀏覽器無法產生安全事件識別碼。");
     if (!grant || Number(grant.get("expires_at")) <= Date.now() / 1000) throw new Error("QR 已過期，請由任務池重新開啟。");
     const random = crypto.getRandomValues(new Uint8Array(32));
     const ephemeral = Array.from(random, n => n.toString(16).padStart(2, "0")).join("");
-    const input = new TextEncoder().encode(grant.get("device_salt") + ":" + ephemeral);
-    const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", input));
     return {
       task_id: taskId, task_type: grant.get("task_type"),
       event_id: "evt-" + ephemeral,
-      device_hash: Array.from(digest, n => n.toString(16).padStart(2, "0")).join(""),
+      device_hash: grant.get("device_hash"), event_type: eventType,
       signature: grant.get("signature"), occurred_at: new Date().toISOString()
     };
   }
-  button.addEventListener("click", async () => {
+  async function submit(eventType) {
     if (busy) return;
+    const confirmations = {
+      accept: "確認接下這筆任務？接單後會在帳本留下時間紀錄。",
+      arrive: "確認已抵達任務現場？到站後會在帳本留下時間紀錄。",
+      complete: "確認已抵達現場且任務實際執行完成？送出後不可恢復。",
+      exception: "確認回報執行異常？只會留下稽核紀錄，不會推進任務狀態。"
+    };
+    if (!window.confirm(confirmations[eventType])) {
+      showMessage("已取消，沒有送出事件，任務狀態未變更。", false);
+      return;
+    }
     busy = true;
+    acceptButton.disabled = true;
+    arriveButton.disabled = true;
     button.disabled = true;
+    reportButton.disabled = true;
     try {
-      if (!pendingEvent) pendingEvent = await createEvent();
+      if (!pendingEvent || pendingEvent.event_type !== eventType) pendingEvent = await createEvent(eventType);
       const response = await fetch(taskPath + "/events", {
         method: "POST", cache: "no-store", headers: {"Content-Type": "application/json"},
         body: JSON.stringify(pendingEvent)
       });
       const payload = await response.json();
       if (!response.ok || !payload.ok) {
-        throw new Error("完成失敗：" + (payload.error || response.status));
+        throw new Error("事件送出失敗：" + (payload.error || response.status));
       }
       render(payload.task);
-      showMessage(payload.duplicate ? "此任務已完成，重複提交未再次更新。" : "任務已完成（本機帳本）。", false);
+      showMessage(
+        payload.audit_only
+          ? "異常已回報；已留下稽核紀錄，任務狀態未推進。"
+          : eventType === "accept"
+            ? payload.duplicate ? "此接單事件已處理，未重複寫入。" : "接單成功；抵達現場後請確認到站。"
+            : eventType === "arrive"
+              ? payload.duplicate ? "此抵達事件已處理，未重複寫入。" : "已確認抵達；完成現場作業後即可結案。"
+              : payload.duplicate ? "此完成事件已處理，未重複更新。" : "任務已完成（" + (backend === "cloud" ? "AWS 帳本" : "本機帳本") + "）。",
+        false
+      );
+      if (payload.audit_only) pendingEvent = null;
     } catch (error) {
       showMessage(error.message || "連線中斷，可重試同一筆事件。", true);
     } finally {
       busy = false;
       if (currentTask) render(currentTask);
     }
-  });
+  }
+  acceptButton.addEventListener("click", () => submit("accept"));
+  arriveButton.addEventListener("click", () => submit("arrive"));
+  button.addEventListener("click", () => submit("complete"));
+  reportButton.addEventListener("click", () => submit("exception"));
   loadTask().catch(error => {
     showMessage(error.message || "任務載入失敗", true);
     button.disabled = true;

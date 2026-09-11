@@ -4,29 +4,33 @@
 
 ```mermaid
 flowchart LR
-  subgraph LOCAL["Local Windows private boundary"]
-    INPUT["History, recent snapshots and weather"] --> ENGINE["Private black box<br/>127.0.0.1:8781"]
-    ENGINE -->|"Sanitized contract only"| BFF["Public BFF"]
-    BFF --> UI["29-district task workspace"]
-    BFF --> SQLITE["Explicit local SQLite mode<br/>OPEN to COMPLETED<br/>Locally tested; not cloud success"]
+  subgraph LOCAL["Windows private boundary"]
+    INPUT["History, snapshots and weather"] --> ENGINE["Private black box / loopback only"]
+    ENGINE -->|"Sanitized contract"| BFF["Public BFF"]
+    FIXTURE["Explicit offline fixture / not realtime"] --> BFF
+    BFF --> UI["Dispatch workspace"]
+    BFF --> MODE{"TASK_BACKEND"}
+    MODE -->|"local only"| SQLITE["SQLite outside repo / accepted_at + arrived_at / OPEN to COMPLETED"]
+    SQLITE --> LANQR["Detected or explicit LAN IPv4 /tasks/id"]
   end
-  subgraph CLOUD["AWS target architecture — deployment pending"]
-    API["API Gateway<br/>Fixed HTTPS task URL"] --> LAMBDA["Lambda<br/>Signature, task type, time and event validation"]
-    LAMBDA -->|"Atomic conditional transaction"| DDB["DynamoDB<br/>Authoritative cloud tasks and events"]
-    DDB -->|"After successful commit; retryable mirror"| SHEET["Google Sheets<br/>Observation and audit mirror"]
-    LAMBDA -->|"Sanitized summary only"| BEDROCK["Bedrock explanation<br/>Failure cannot change task state"]
+  subgraph CLOUD["AWS target / deployment verification required"]
+    API["API Gateway HTTPS"] --> LAMBDA["Lambda / validated accept, arrive and complete transitions"]
+    LAMBDA --> DDB["DynamoDB / cloud authority"]
+    DDB -. "Planned retryable audit mirror" .-> SHEET["Google Sheets / pending"]
+    LAMBDA -. "Planned sanitized explanation" .-> BEDROCK["Bedrock / separate acceptance"]
   end
-  BFF -. "Authenticated task publication — pending" .-> API
-  UI -. "Short-lived signed HTTPS QR — pending" .-> PHONE["Phone on 4G or 5G"]
-  PHONE -. "Complete task" .-> API
-  API -. "Cloud task status — pending" .-> UI
-  LAMBDA --> REJECT["Invalid event: append rejection<br/>Do not change task"]
+  MODE -->|"cloud / explicit AWS profile / us-west-2 / no local SQLite"| API
+  UI -->|"PUBLIC_TASK_BASE_URL HTTPS /tasks/id"| PHONE["Phone on 4G or 5G"]
+  PHONE --> API
+  LANQR --> WIFI["Phone on same Wi-Fi / signed local grant"]
+  API -->|"Authoritative response; fail closed on errors"| UI
 ```
 
-Solid local SQLite paths describe the locally tested implementation. The AWS block is the intended deployment, not deployed infrastructure. Cloud operator authentication, DynamoDB transactions, Sheets mirroring and cellular QR verification remain pending. A local completion is always labelled as local; it cannot substitute for AWS confirmation.
+`TASK_BACKEND=local` creates only the external local ledger; `TASK_BACKEND=cloud` uses the AWS task API and never creates a fallback local task ledger. Offline/live selects result provenance independently from task storage. `PUBLIC_TASK_BASE_URL` preserves an explicit operator URL; local auto-detection requires exactly one usable IPv4 and stops on ambiguity. AWS HTTPS URLs may include a stage prefix, followed by `/tasks/{task_id}`. The cloud API can be separately configured with `TASK_CLOUD_API_URL`. Cloud mode requires an explicit `YOUBIKE_AWS_PROFILE`; every YouBike resource request is explicitly signed for `YOUBIKE_AWS_REGION=us-west-2`, independent of the profile's login-region setting.
 
+These boundaries describe the configured implementation and deployment target. Actual AWS deployment, cloud authentication, Windows S513E and cellular QR acceptance require independent evidence. Sheets mirroring and Bedrock explanation are separate pending integrations. Local completion is never evidence of AWS confirmation.
 
-The public application exposes the complete operating workflow. The private engine supplies only contract-bound results and does not send formulas, weights, exact scores or source databases to the browser.
+The public application exposes the complete accept-to-arrive-to-complete operating workflow. `accepted_at` and `arrived_at` record separate transitions while `status` remains `OPEN` until completion. Exception events remain audit-only and do not advance either transition. The private engine supplies only contract-bound results and does not send formulas, weights, exact scores or source databases to the browser.
 
 ## Dispatch Vehicle Policy
 
@@ -74,11 +78,11 @@ The executable page, API and evidence ownership table is maintained in [PAGE_AND
 
 ## Trust Boundaries
 
-1. The browser calls only the public same-origin BFF and task API.
+1. The dashboard calls the local BFF; cloud QR opens the configured AWS HTTPS task page and its same-origin API.
 2. The black-box bearer token remains in a file outside this repository.
 3. The private API is loopback-only on the venue computer.
-4. The task database is created outside this repository.
+4. Local task mode creates SQLite outside this repository; cloud mode creates no local task database.
 5. Bedrock receives district aliases, bands, small counts, reason tags and policy flags only.
 6. Bedrock failure does not stop local dispatch, task creation or QR actions.
 7. Offline data is selected explicitly and is never an automatic fallback.
-8. An unrelated submitted project, its repository and its AWS profile are never reused by this project.
+8. The task BFF may use the explicitly selected `vibegate-dev` AWS CLI profile for the rehearsal. The Bedrock adapter retains its separate forbidden-profile policy, so Bedrock stays disabled with that profile or uses a separately approved profile.
