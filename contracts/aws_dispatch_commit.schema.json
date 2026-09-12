@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/contracts/aws_dispatch_commit.schema.json",
+  "title": "YouBike AWS Dispatch Commit v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "runtime_mode",
+    "generation_id",
+    "source_snapshot_at",
+    "produced_at",
+    "manifest_sha256",
+    "payload_sha256",
+    "districts",
+    "tasks"
+  ],
+  "properties": {
+    "schema": {"const": "youbike.aws_dispatch_commit.v1"},
+    "runtime_mode": {"const": "LIVE"},
+    "generation_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"},
+    "source_snapshot_at": {"type": "string", "format": "date-time"},
+    "produced_at": {"type": "string", "format": "date-time"},
+    "manifest_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "payload_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "districts": {
+      "type": "array",
+      "minItems": 29,
+      "maxItems": 29,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["district_id", "district_name", "status_level", "suggested_action"],
+        "properties": {
+          "district_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"},
+          "district_name": {"type": "string", "minLength": 1, "maxLength": 32},
+          "status_level": {"enum": ["CRITICAL", "WATCH", "STABLE"]},
+          "suggested_action": {"enum": ["OBSERVE", "REBALANCE", "DISPATCH"]}
+        }
+      }
+    },
+    "tasks": {
+      "type": "array",
+      "minItems": 0,
+      "maxItems": 36,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["task_id", "district_id", "station_id", "priority_level", "suggested_action", "created_at", "expires_at"],
+        "properties": {
+          "task_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"},
+          "district_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"},
+          "station_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"},
+          "priority_level": {"enum": ["CRITICAL", "HIGH", "MEDIUM", "LOW"]},
+          "suggested_action": {"enum": ["MOTORCYCLE_CHECK", "TRUCK_REBALANCE", "OBSERVE"]},
+          "created_at": {"type": "string", "format": "date-time"},
+          "expires_at": {"type": "string", "format": "date-time"}
+        }
+      }
+    }
+  }
+}

@@ -1,36 +1,26 @@
 # Security Scan Evidence
 
 Review date: 2026-09-11
-Owner: repository owner
-Scope: PUBLIC_EXPORT_MANIFEST.json allowlisted files
+Scope: public source identified by PUBLIC_EXPORT_MANIFEST.json hashes.
 
-## Results
+## Current local validation
 
-- Python and JavaScript syntax checks: PASS
-- Playwright responsive visual smoke: PASS on 1440x900 and 390x844
-- Unit and integration tests: 25 passed
-- LocalGuard development safety gate: 2 reviewed medium findings, 0 blocking
-- AI Security export gate: PASS, 0 blocking
-- Release boundary safety gate: 0 findings, 0 blocking
-- Explicit personal data and private algorithm scan: 0 findings
+- Python 3.13: 90 tests executed, 89 PASS and 1 Windows-only PowerShell SKIP on macOS. The suite includes JavaScript browser-script harnesses, real loopback gateway tests, task-state concurrency and committed LIVE snapshot tests.
+- JavaScript syntax: both public scripts PASS.
+- Bounded Python AST SAST: five runtime and CI Python files, zero findings. Checks cover dynamic evaluation, shell execution, unsafe deserialization, unsafe temporary files, shell=True and disabled TLS verification. This bounded SAST does not claim exhaustive security proof.
+- Gitleaks worktree scan: one reviewed false positive on the manifest digest associated with SECRET_SCAN_EVIDENCE.md. The value was verified as that file's SHA-256, not a credential. No other match.
+- AI Security export-gate: PASS with 0 blocking findings; portfolio review contained no HIGH or CRITICAL finding.
+- Release-boundary gate: PASS with 0 findings.
+- LocalGuard: 0 HIGH/CRITICAL findings; 11 MEDIUM signals were manually reviewed. Three were nonsecret examples or manifest digests, three were expected public API routes, three were fetch/cache signals despite explicit no-store controls, and two were documentation markers for unaccepted deployment boundaries.
 
-## Remediation Performed
+## Verified boundaries
 
-- Replaced long protocol literals and route strings that resembled secrets.
-- Removed a client-side hidden marker that resembled an authorization gate.
-- Kept API responses and browser requests on no-store cache policy.
-- Removed remote algorithm mode from the published result contract.
-- Enforced an exact public static-file allowlist.
-- Allowed only the explicit `mode=offline` query on the public index; unknown index queries remain blocked.
-- Enforced LIVE result, response, and source timestamp freshness with stale, future, and missing-value rejection tests.
-- Enforced the complete black-box request and response JSON Schemas, including unknown-field rejection and short-lived credential expiry.
-- Enforced equality between the repository package, manifest allowlist and SHA-256 key set.
-- Removed exact percentage labels from the public historical SVG while retaining intervalized trend direction.
+The BFF only sends its credential to the exact loopback evaluation route and rejects redirects. Response schemas reject unexpected fields; stale or future source timestamps cannot refresh the committed result. Task seeding must commit before the corresponding result is published. Repeated GET requests neither refetch nor seed tasks. Static routes are allowlisted; responses use no-store and no-referrer.
 
-## Reviewed Tool Finding
+The task ledger enforces accept, arrive and complete ordering, audit-only exceptions, event idempotency, expiry, transaction rollback and restart persistence. Accepted tasks retain their dispatch identity when a later generation arrives. Runtime databases stay outside the source tree. Bedrock input is sanitized and prepare-only execution is distinct from provider inference.
 
-The AI Security portfolio scanner reports the GitHub Actions dependency installation step twice as high-risk executable configuration. This is an expected CI package-runner step using the two pinned direct dependencies in requirements.txt. The dedicated export gate evaluated the same candidate as PASS with zero blocking items.\n\nLocalGuard reports the documented public API route map and a possible browser-cache risk. The route map is intentionally public; private credentials remain server-side and the private API is loopback-only. No service worker or Cache Storage implementation exists, and every API response sends Cache-Control: no-store. Both findings are reviewed documentation-pattern matches rather than unmitigated runtime exposures.
+The CI package runner is governed by docs/package-runner-allowlist.md and a tested dependency contract. It uses no shell, fixed pinned direct requirements and binary-only packages from the fixed index. Transitive dependencies remain resolver-selected and Actions remain version-tag references; neither is represented as a fully hashed supply-chain lock.
 
-## Residual Risk
+## Acceptance limits
 
-A real Windows machine, phone QR scan and paid Bedrock call still require venue-owner execution. Those runtime checks do not change the publication boundary.
+Local passing socket tests used the authorized loopback-capable execution environment. Physical-phone evidence covers eight district accepts only. Local automated tests separately cover the accept, arrive, exception-audit and complete lifecycle. Windows GitHub Actions must pass for the published commit. Windows S513E physical installation, AWS deployed state, Google Sheets live mirroring, cellular QR operation and sustained live collection remain separate acceptance boundaries. Earlier evidence does not promote those states.

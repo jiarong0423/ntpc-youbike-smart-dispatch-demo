@@ -3,34 +3,101 @@
 
 from __future__ import annotations
 
+import argparse
+import base64
 from contextlib import closing
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from http import HTTPStatus
 from pathlib import Path
+import hashlib
+import hmac
+import json
+import os
 import re
+import secrets
 import sqlite3
+import time
 from typing import Any
 
 TASK_ID_RE = re.compile(r"^task-[a-z0-9][a-z0-9-]{3,64}$")
 EVENT_ID_RE = re.compile(r"^evt-[A-Za-z0-9_-]{8,80}$")
-ACTOR_RE = re.compile(r"^[A-Za-z0-9_-]{1,24}$")
-EVENT_TRANSITIONS = {
-    ("pending", "claim"): "claimed",
-    ("claimed", "arrive"): "arrived",
-    ("arrived", "complete"): "completed",
-    ("claimed", "exception"): "exception",
-    ("arrived", "exception"): "exception",
+TASK_TYPES = {"add_bikes", "pull_bikes", "observe", "rebalance_window"}
+# The signed QR grant stays short: it is handed to a phone and must not outlive the
+# visit. A dispatch task itself has to stay actionable until the next generation
+# replaces it, and generations arrive between 5 and 30 minutes apart depending on the
+# collection cadence, so the two windows are configured separately. Sharing one value
+# left every task expired for most of each cycle.
+QR_TTL_SECONDS = 300
+TASK_OPEN_TTL_SECONDS = max(
+    QR_TTL_SECONDS,
+    int(os.environ.get("YOUBIKE_TASK_OPEN_TTL_SECONDS", "2400")),
+)
+EVENT_MAX_AGE_SECONDS = 300
+FUTURE_SKEW_SECONDS = 30
+SCHEMA_VERSION = 4
+
+V3_REQUIRED_COLUMNS = {
+    "task": {"task_id", "case_id", "display_name", "district_id", "action_label", "priority_band", "route_label", "eta_band", "status", "accepted_at", "source_package_id", "created_at", "updated_at"},
+    "task_event": {"event_id", "task_id", "event_type", "request_hash", "status_before", "status_after", "created_at"},
+    "task_attempt": {"attempt_id", "task_id", "event_id", "error_code", "created_at"},
+}
+V4_REQUIRED_COLUMNS = {
+    **V3_REQUIRED_COLUMNS,
+    "task": V3_REQUIRED_COLUMNS["task"] | {"arrived_at"},
 }
 
 
+def _external_path(path: Path, project_root: Path, error: str) -> Path:
+    resolved = path.expanduser().resolve()
+    root = project_root.resolve()
+    if resolved == root or root in resolved.parents:
+        raise ValueError(error)
+    return resolved
+
+
+def _validate_schema(conn: sqlite3.Connection, version: int, required_columns: dict[str, set[str]]) -> None:
+    if conn.execute("PRAGMA user_version").fetchone()[0] != version:
+        raise ValueError("task_database_schema_requires_explicit_migration")
+    for table, columns in required_columns.items():
+        actual = {row[1] for row in conn.execute("PRAGMA table_info(" + table + ")")}
+        if actual != columns:
+            raise ValueError("task_database_schema_requires_explicit_migration")
+    if conn.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+        raise ValueError("task_database_integrity_failed")
+
+
+def canonical(payload: Any) -> bytes:
+    return json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+
+
+def source_generation_id(result: dict) -> str:
+    """Identify the batch a task row came from.
+
+    LIVE results carry `live_scope.generation_id`; older sealed packages carry
+    `package_id`. Either way the value changes whenever a new batch is published,
+    which is what the upsert below compares against.
+    """
+    scope = result.get("live_scope")
+    if isinstance(scope, dict) and scope.get("generation_id"):
+        return str(scope["generation_id"])[:64]
+    if result.get("package_id"):
+        return str(result["package_id"])[:64]
+    raise ValueError("result_missing_source_generation")
+
+
 class TaskStore:
-    def __init__(self, path: Path, project_root: Path) -> None:
-        self.path = path.expanduser().resolve()
-        root = project_root.resolve()
-        if self.path == root or root in self.path.parents:
-            raise ValueError("task_database_must_be_outside_project")
+    def __init__(self, path: Path, project_root: Path, *, signing_key: bytes | None = None) -> None:
+        self.path = _external_path(path, project_root, "task_database_must_be_outside_project")
+        self.signing_key = signing_key if signing_key is not None else secrets.token_bytes(32)
+        if len(self.signing_key) < 32:
+            raise ValueError("signing_key_too_short")
+        existing_database = self.path.exists()
+        if existing_database:
+            with closing(sqlite3.connect(self.path.as_uri() + "?mode=ro", uri=True)) as conn:
+                _validate_schema(conn, SCHEMA_VERSION, V4_REQUIRED_COLUMNS)
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self._init_schema()
+        if not existing_database:
+            self._init_schema()
 
     def connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.path, timeout=10)
@@ -54,7 +121,8 @@ class TaskStore:
                     route_label TEXT NOT NULL,
                     eta_band TEXT NOT NULL,
                     status TEXT NOT NULL,
-                    actor_alias TEXT,
+                    accepted_at TEXT,
+                    arrived_at TEXT,
                     source_package_id TEXT NOT NULL,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
@@ -63,11 +131,19 @@ class TaskStore:
                     event_id TEXT PRIMARY KEY,
                     task_id TEXT NOT NULL REFERENCES task(task_id),
                     event_type TEXT NOT NULL,
-                    actor_alias TEXT NOT NULL,
+                    request_hash TEXT NOT NULL,
                     status_before TEXT NOT NULL,
                     status_after TEXT NOT NULL,
                     created_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS task_attempt (
+                    attempt_id INTEGER PRIMARY KEY,
+                    task_id TEXT,
+                    event_id TEXT,
+                    error_code TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+                PRAGMA user_version = 4;
                 CREATE INDEX IF NOT EXISTS idx_task_event_task
                     ON task_event(task_id, created_at);
                 """
@@ -75,7 +151,41 @@ class TaskStore:
             conn.commit()
 
     @staticmethod
-    def public_task(row: sqlite3.Row) -> dict[str, Any]:
+    def _expires_at(row: sqlite3.Row) -> datetime:
+        try:
+            updated = datetime.fromisoformat(
+                str(row["updated_at"]).replace("Z", "+00:00")
+            )
+            if updated.tzinfo is None:
+                raise ValueError("task_updated_at_timezone_missing")
+            return updated.astimezone(timezone.utc) + timedelta(
+                seconds=TASK_OPEN_TTL_SECONDS
+            )
+        except (TypeError, ValueError):
+            return datetime.fromtimestamp(0, timezone.utc)
+
+    @classmethod
+    def public_task(
+        cls,
+        row: sqlite3.Row,
+        *,
+        now: float | None = None,
+    ) -> dict[str, Any]:
+        current = time.time() if now is None else now
+        status = row["status"]
+        expiry = cls._expires_at(row)
+        expires_at = (
+            expiry.isoformat(timespec="seconds")
+            if status == "OPEN" and row["accepted_at"] is None
+            else None
+        )
+        if (
+            status == "OPEN"
+            and row["accepted_at"] is None
+            and current >= expiry.timestamp()
+        ):
+            status = "EXPIRED"
+            expires_at = None
         return {
             "task_id": row["task_id"],
             "case_id": row["case_id"],
@@ -85,8 +195,13 @@ class TaskStore:
             "priority_band": row["priority_band"],
             "route_label": row["route_label"],
             "eta_band": row["eta_band"],
-            "status": row["status"],
-            "actor_alias": row["actor_alias"],
+            "status": status,
+            "accepted": row["accepted_at"] is not None,
+            "accepted_at": row["accepted_at"],
+            "arrived": row["arrived_at"] is not None,
+            "arrived_at": row["arrived_at"],
+            "task_type": row["action_label"],
+            "expires_at": expires_at,
             "updated_at": row["updated_at"],
         }
 
@@ -110,8 +225,10 @@ class TaskStore:
                     str(case["priority_band"])[:16],
                     str(handoff.get("label", "route"))[:80],
                     str(handoff.get("eta_band", "none"))[:24],
-                    "pending",
-                    result["package_id"],
+                    "OPEN",
+                    None,
+                    None,
+                    source_generation_id(result),
                     now,
                     now,
                 )
@@ -121,9 +238,9 @@ class TaskStore:
                 """
                 INSERT INTO task (
                     task_id, case_id, display_name, district_id, action_label,
-                    priority_band, route_label, eta_band, status,
+                    priority_band, route_label, eta_band, status, accepted_at, arrived_at,
                     source_package_id, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(case_id) DO UPDATE SET
                     display_name=excluded.display_name,
                     district_id=excluded.district_id,
@@ -131,8 +248,15 @@ class TaskStore:
                     priority_band=excluded.priority_band,
                     route_label=excluded.route_label,
                     eta_band=excluded.eta_band,
-                    source_package_id=excluded.source_package_id,
-                    updated_at=excluded.updated_at
+                    updated_at=CASE
+                        WHEN task.source_package_id <> excluded.source_package_id
+                        THEN excluded.updated_at
+                        ELSE task.updated_at
+                    END,
+                    source_package_id=excluded.source_package_id
+                WHERE task.status = 'OPEN'
+                  AND task.accepted_at IS NULL
+                  AND task.arrived_at IS NULL
                 """,
                 rows,
             )
@@ -155,102 +279,285 @@ class TaskStore:
             ).fetchone()
         return self.public_task(row) if row else None
 
-    def apply_event(
-        self, task_id: str, payload: Any
-    ) -> tuple[int, dict[str, Any]]:
-        if not TASK_ID_RE.fullmatch(task_id) or not isinstance(payload, dict):
-            return HTTPStatus.BAD_REQUEST, {
-                "ok": False,
-                "error": "invalid_request",
-            }
-        required = {"event_id", "event_type", "actor_alias"}
-        if set(payload) != required:
-            return HTTPStatus.BAD_REQUEST, {
-                "ok": False,
-                "error": "event_fields_invalid",
-            }
-        event_id = str(payload["event_id"])
-        event_type = str(payload["event_type"])
-        actor_alias = str(payload["actor_alias"])
+    def issue_signature(self, task_id: str, *, now: int | None = None) -> dict[str, Any]:
+        task = self.get_task(task_id)
+        if not task or task["status"] != "OPEN":
+            raise ValueError("task_not_open")
+        issued = int(time.time()) if now is None else now
+        claims = {"task_id": task_id, "task_type": task["task_type"],
+                  "issued_at": issued, "expires_at": issued + QR_TTL_SECONDS,
+                  "device_salt": secrets.token_hex(16)}
+        claims["device_hash"] = hashlib.sha256((claims["device_salt"] + secrets.token_hex(32)).encode()).hexdigest()
+        encoded = base64.urlsafe_b64encode(canonical(claims)).decode().rstrip("=")
+        digest = hmac.new(self.signing_key, encoded.encode(), hashlib.sha256).hexdigest()
+        return {**claims, "signature": encoded + "." + digest}
+
+    def _verify_signature(self, token: str, task_id: str, task_type: str, now: float, device_hash: str) -> bool:
+        try:
+            encoded, digest = token.split(".")
+            expected = hmac.new(self.signing_key, encoded.encode(), hashlib.sha256).hexdigest()
+            if not hmac.compare_digest(expected, digest):
+                return False
+            claims = json.loads(base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4)))
+            return (claims["task_id"] == task_id and claims["task_type"] == task_type
+                    and hmac.compare_digest(claims["device_hash"], device_hash)
+                    and claims["issued_at"] <= now + FUTURE_SKEW_SECONDS
+                    and now < claims["expires_at"]
+                    and claims["expires_at"] - claims["issued_at"] == QR_TTL_SECONDS)
+        except (ValueError, KeyError, TypeError):
+            return False
+
+    def _expire_open_row(
+        self,
+        conn: sqlite3.Connection,
+        row: sqlite3.Row,
+        *,
+        now: float,
+        timestamp: str,
+    ) -> sqlite3.Row:
         if (
-            not EVENT_ID_RE.fullmatch(event_id)
-            or event_type not in {"claim", "arrive", "complete", "exception"}
-            or not ACTOR_RE.fullmatch(actor_alias)
+            row["status"] != "OPEN"
+            or row["accepted_at"] is not None
+            or now < self._expires_at(row).timestamp()
         ):
-            return HTTPStatus.BAD_REQUEST, {
-                "ok": False,
-                "error": "event_value_invalid",
-            }
-
-        now = datetime.now(timezone.utc).isoformat(timespec="seconds")
-        with closing(self.connect()) as conn:
-            conn.execute("BEGIN IMMEDIATE")
-            existing = conn.execute(
-                "SELECT task_id FROM task_event WHERE event_id = ?",
-                (event_id,),
-            ).fetchone()
-            row = conn.execute(
-                "SELECT * FROM task WHERE task_id = ?", (task_id,)
-            ).fetchone()
-            if not row:
-                conn.rollback()
-                return HTTPStatus.NOT_FOUND, {
-                    "ok": False,
-                    "error": "task_not_found",
+            return row
+        basis = f"{row['task_id']}|{row['updated_at']}"
+        event_id = (
+            "evt-expire-"
+            + hashlib.sha256(basis.encode()).hexdigest()[:32]
+        )
+        request_hash = hashlib.sha256(
+            canonical(
+                {
+                    "task_id": row["task_id"],
+                    "event_type": "expire",
+                    "expired_from": row["updated_at"],
                 }
-            if existing:
-                conn.rollback()
-                if existing["task_id"] != task_id:
-                    return HTTPStatus.CONFLICT, {
-                        "ok": False,
-                        "error": "event_id_conflict",
-                    }
-                return HTTPStatus.OK, {
-                    "ok": True,
-                    "duplicate": True,
-                    "task": self.public_task(row),
-                }
-
-            status_before = str(row["status"])
-            status_after = EVENT_TRANSITIONS.get(
-                (status_before, event_type)
             )
-            if not status_after:
-                conn.rollback()
-                return HTTPStatus.CONFLICT, {
-                    "ok": False,
-                    "error": "invalid_transition",
-                    "status": status_before,
-                    "event_type": event_type,
-                }
-
+        ).hexdigest()
+        changed = conn.execute(
+            """
+            UPDATE task
+            SET status='EXPIRED', updated_at=?
+            WHERE task_id=?
+              AND status='OPEN'
+              AND accepted_at IS NULL
+              AND arrived_at IS NULL
+              AND updated_at=?
+            """,
+            (timestamp, row["task_id"], row["updated_at"]),
+        )
+        if changed.rowcount == 1:
             conn.execute(
-                """
-                UPDATE task
-                SET status = ?, actor_alias = ?, updated_at = ?
-                WHERE task_id = ?
-                """,
-                (status_after, actor_alias, now, task_id),
-            )
-            conn.execute(
-                "INSERT INTO task_event VALUES (?, ?, ?, ?, ?, ?, ?)",
+                "INSERT OR IGNORE INTO task_event VALUES (?,?,?,?,?,?,?)",
                 (
                     event_id,
-                    task_id,
-                    event_type,
-                    actor_alias,
-                    status_before,
-                    status_after,
-                    now,
+                    row["task_id"],
+                    "expire",
+                    request_hash,
+                    "OPEN",
+                    "EXPIRED",
+                    timestamp,
                 ),
             )
-            conn.commit()
-            updated = conn.execute(
-                "SELECT * FROM task WHERE task_id = ?", (task_id,)
-            ).fetchone()
+        return conn.execute(
+            "SELECT * FROM task WHERE task_id=?",
+            (row["task_id"],),
+        ).fetchone()
 
-        return HTTPStatus.OK, {
-            "ok": True,
-            "duplicate": False,
-            "task": self.public_task(updated),
-        }
+    def reject(self, task_id: str, event_id: Any, error: str, status: int = 400,
+               *, conn: sqlite3.Connection | None = None) -> tuple[int, dict[str, Any]]:
+        values = (task_id if TASK_ID_RE.fullmatch(task_id) else None,
+                  event_id if isinstance(event_id, str) and EVENT_ID_RE.fullmatch(event_id) else None,
+                  error, datetime.now(timezone.utc).isoformat(timespec="seconds"))
+        if conn is None:
+            with closing(self.connect()) as audit:
+                audit.execute("INSERT INTO task_attempt(task_id,event_id,error_code,created_at) VALUES (?,?,?,?)", values)
+                audit.commit()
+        else:
+            conn.execute("INSERT INTO task_attempt(task_id,event_id,error_code,created_at) VALUES (?,?,?,?)", values)
+            conn.commit()
+        return status, {"ok": False, "error": error}
+
+    def apply_event(self, task_id: str, payload: Any) -> tuple[int, dict[str, Any]]:
+        event_id = payload.get("event_id") if isinstance(payload, dict) else None
+        required = {"task_id", "task_type", "event_id", "device_hash", "signature", "occurred_at", "event_type"}
+        if not TASK_ID_RE.fullmatch(task_id) or not isinstance(payload, dict) or set(payload) != required:
+            return self.reject(task_id, event_id, "event_fields_invalid")
+        if payload.get("event_type") not in {"accept", "arrive", "complete", "exception"}:
+            return self.reject(task_id, event_id, "event_type_invalid")
+        if (not all(isinstance(v, str) for v in payload.values())
+                or not EVENT_ID_RE.fullmatch(event_id)
+                or payload["task_id"] != task_id
+                or payload["task_type"] not in TASK_TYPES
+                or not re.fullmatch(r"[a-f0-9]{64}", payload["device_hash"])
+                or len(payload["signature"]) > 1024):
+            return self.reject(task_id, event_id, "event_value_invalid")
+        request_hash = hashlib.sha256(canonical(payload)).hexdigest()
+        with closing(self.connect()) as conn:
+            existing = conn.execute(
+                "SELECT * FROM task_event WHERE event_id=?",
+                (event_id,),
+            ).fetchone()
+            if existing:
+                row = conn.execute(
+                    "SELECT * FROM task WHERE task_id=?",
+                    (existing["task_id"],),
+                ).fetchone()
+                if (
+                    existing["task_id"] != task_id
+                    or existing["request_hash"] != request_hash
+                ):
+                    return self.reject(
+                        task_id,
+                        event_id,
+                        "event_id_conflict",
+                        409,
+                    )
+                return 200, {
+                    "ok": True,
+                    "duplicate": True,
+                    "audit_only": existing["event_type"] == "exception",
+                    "task": self.public_task(row),
+                }
+        now = time.time()
+        try:
+            occurred = datetime.fromisoformat(payload["occurred_at"].replace("Z", "+00:00"))
+            if occurred.tzinfo is None:
+                raise ValueError("timezone_missing")
+            age = now - occurred.timestamp()
+            if not -FUTURE_SKEW_SECONDS <= age <= EVENT_MAX_AGE_SECONDS:
+                raise ValueError("time_out_of_range")
+        except (ValueError, OverflowError):
+            return self.reject(task_id, event_id, "event_time_invalid")
+        timestamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        with closing(self.connect()) as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute("SELECT * FROM task WHERE task_id=?", (task_id,)).fetchone()
+            if not row:
+                return self.reject(task_id, event_id, "task_not_found", 404, conn=conn)
+            row = self._expire_open_row(
+                conn,
+                row,
+                now=time.time(),
+                timestamp=timestamp,
+            )
+            if row["status"] == "EXPIRED":
+                return self.reject(
+                    task_id,
+                    event_id,
+                    "task_expired",
+                    410,
+                    conn=conn,
+                )
+            if not self._verify_signature(payload["signature"], task_id, payload["task_type"], time.time(), payload["device_hash"]):
+                return self.reject(task_id, event_id, "signature_invalid_or_expired", 403, conn=conn)
+            if row["action_label"] != payload["task_type"]:
+                return self.reject(task_id, event_id, "task_type_mismatch", 409, conn=conn)
+            existing = conn.execute("SELECT * FROM task_event WHERE event_id=?", (event_id,)).fetchone()
+            if existing:
+                if existing["task_id"] != task_id or existing["request_hash"] != request_hash:
+                    return self.reject(task_id, event_id, "event_id_conflict", 409, conn=conn)
+                conn.rollback()
+                return 200, {"ok": True, "duplicate": True, "audit_only": existing["event_type"] == "exception", "task": self.public_task(row)}
+            if row["status"] != "OPEN":
+                return self.reject(task_id, event_id, "invalid_transition", 409, conn=conn)
+            if payload.get("event_type") == "accept":
+                if row["accepted_at"] is not None:
+                    return self.reject(task_id, event_id, "task_already_accepted", 409, conn=conn)
+                changed = conn.execute(
+                    "UPDATE task SET accepted_at=?, updated_at=? WHERE task_id=? AND status='OPEN' AND accepted_at IS NULL",
+                    (timestamp, timestamp, task_id),
+                )
+                if changed.rowcount != 1:
+                    return self.reject(task_id, event_id, "task_already_accepted", 409, conn=conn)
+                conn.execute("INSERT INTO task_event VALUES (?,?,?,?,?,?,?)",
+                             (event_id, task_id, "accept", request_hash, "OPEN", "OPEN", timestamp))
+                updated = conn.execute("SELECT * FROM task WHERE task_id=?", (task_id,)).fetchone()
+                conn.commit()
+                return 200, {"ok": True, "duplicate": False, "accepted": True, "task": self.public_task(updated)}
+            if row["accepted_at"] is None:
+                return self.reject(task_id, event_id, "task_not_accepted", 409, conn=conn)
+            if payload.get("event_type") == "exception":
+                conn.execute("INSERT INTO task_event VALUES (?,?,?,?,?,?,?)",
+                             (event_id, task_id, "exception", request_hash, "OPEN", "OPEN", timestamp))
+                conn.commit()
+                return 200, {"ok": True, "duplicate": False, "audit_only": True, "task": self.public_task(row)}
+            if payload.get("event_type") == "arrive":
+                if row["arrived_at"] is not None:
+                    return self.reject(task_id, event_id, "task_already_arrived", 409, conn=conn)
+                changed = conn.execute(
+                    "UPDATE task SET arrived_at=?, updated_at=? WHERE task_id=? AND status='OPEN' AND accepted_at IS NOT NULL AND arrived_at IS NULL",
+                    (timestamp, timestamp, task_id),
+                )
+                if changed.rowcount != 1:
+                    return self.reject(task_id, event_id, "task_already_arrived", 409, conn=conn)
+                conn.execute("INSERT INTO task_event VALUES (?,?,?,?,?,?,?)",
+                             (event_id, task_id, "arrive", request_hash, "OPEN", "OPEN", timestamp))
+                updated = conn.execute("SELECT * FROM task WHERE task_id=?", (task_id,)).fetchone()
+                conn.commit()
+                return 200, {"ok": True, "duplicate": False, "arrived": True, "task": self.public_task(updated)}
+            if row["arrived_at"] is None:
+                return self.reject(task_id, event_id, "task_not_arrived", 409, conn=conn)
+            changed = conn.execute("UPDATE task SET status='COMPLETED', updated_at=? WHERE task_id=? AND status='OPEN'", (timestamp, task_id))
+            if changed.rowcount != 1:
+                return self.reject(task_id, event_id, "invalid_transition", 409, conn=conn)
+            conn.execute("INSERT INTO task_event VALUES (?,?,?,?,?,?,?)",
+                         (event_id, task_id, "complete", request_hash, "OPEN", "COMPLETED", timestamp))
+            updated = conn.execute("SELECT * FROM task WHERE task_id=?", (task_id,)).fetchone()
+            conn.commit()
+        return 200, {"ok": True, "duplicate": False, "task": self.public_task(updated)}
+
+    @classmethod
+    def migrate_v3_to_v4(cls, path: Path, project_root: Path, backup_path: Path) -> Path:
+        source = _external_path(path, project_root, "task_database_must_be_outside_project")
+        backup = _external_path(backup_path, project_root, "task_database_backup_must_be_outside_project")
+        if source == backup:
+            raise ValueError("task_database_backup_must_differ")
+        if not source.is_file():
+            raise ValueError("task_database_missing")
+        if backup.exists():
+            raise ValueError("task_database_backup_exists")
+        backup.parent.mkdir(parents=True, exist_ok=True)
+        with closing(sqlite3.connect(source.as_uri() + "?mode=ro", uri=True)) as existing:
+            _validate_schema(existing, 3, V3_REQUIRED_COLUMNS)
+            with closing(sqlite3.connect(backup)) as destination:
+                existing.backup(destination)
+        with closing(sqlite3.connect(backup.as_uri() + "?mode=ro", uri=True)) as saved:
+            _validate_schema(saved, 3, V3_REQUIRED_COLUMNS)
+        with closing(sqlite3.connect(source, timeout=10)) as conn:
+            try:
+                conn.execute("BEGIN EXCLUSIVE")
+                _validate_schema(conn, 3, V3_REQUIRED_COLUMNS)
+                conn.execute("ALTER TABLE task ADD COLUMN arrived_at TEXT")
+                conn.execute("PRAGMA user_version = 4")
+                _validate_schema(conn, 4, V4_REQUIRED_COLUMNS)
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+        with closing(sqlite3.connect(source.as_uri() + "?mode=ro", uri=True)) as migrated:
+            _validate_schema(migrated, 4, V4_REQUIRED_COLUMNS)
+        return backup
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Explicit migration for the public task ledger")
+    subparsers = parser.add_subparsers(dest="command", required=True)
+    migrate = subparsers.add_parser("migrate-v3-to-v4")
+    migrate.add_argument("--database", type=Path, required=True)
+    migrate.add_argument("--backup", type=Path, required=True)
+    args = parser.parse_args(argv)
+    if args.command != "migrate-v3-to-v4":
+        parser.error("unsupported command")
+    backup = TaskStore.migrate_v3_to_v4(
+        args.database,
+        Path(__file__).resolve().parents[1],
+        args.backup,
+    )
+    print(json.dumps({"ok": True, "schema_version": 4, "backup": str(backup)}, sort_keys=True))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

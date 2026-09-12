@@ -5,11 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <link rel="icon" href="data:,">
     <title>YouBike 任務交接</title>
-    <link rel="stylesheet" href="./task.css">
+    <link rel="stylesheet" href="/public_shell/task.css">
   </head>
   <body>
     <main class="task-shell">
-      <nav><a href="./index.html">返回任務池</a></nav>
       <header>
         <p class="eyebrow">Public task handoff</p>
         <h1>任務交接</h1>
@@ -24,23 +23,23 @@
             <div><dt>交接</dt><dd id="task-route">-</dd></div>
             <div><dt>更新時間</dt><dd id="task-updated">-</dd></div>
           </dl>
-          <label for="actor-alias">操作員代號</label>
-          <input id="actor-alias" value="operator-01" maxlength="24" pattern="[A-Za-z0-9_-]+">
           <div class="actions" aria-label="task actions">
-            <button type="button" data-event="claim">認領</button>
-            <button type="button" data-event="arrive">到站</button>
-            <button type="button" data-event="complete">完成</button>
-            <button type="button" class="danger" data-event="exception">異常</button>
+            <button type="button" data-event="accept" disabled>接單</button>
+            <button type="button" data-event="arrive" disabled>確認抵達</button>
+            <button type="button" data-event="complete" disabled>完成任務</button>
+            <button type="button" data-event="exception" disabled>回報執行異常</button>
           </div>
+          <p id="workflow-notice">請先接單，抵達現場後確認到站，再完成任務。</p>
+          <p id="runtime-notice">正在確認任務帳本來源。</p>
           <p id="message" role="status"></p>
         </article>
         <aside class="qr-panel">
           <img id="task-qr" alt="此任務的交接 QR code">
-          <p>手機與展示電腦連到同一個區域網路後掃描。</p>
+          <p>短期 QR 有效 5 分鐘；過期請由任務池重新開啟。</p>
           <a id="task-link" href="#">直接開啟此任務</a>
         </aside>
       </section>
     </main>
-    <script src="./task.js"></script>
+    <script src="/public_shell/task.js"></script>
   </body>
 </html>
