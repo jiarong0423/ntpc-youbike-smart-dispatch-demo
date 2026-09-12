@@ -9,8 +9,7 @@
     "request_id",
     "requested_at",
     "nonce",
-    "view",
-    "limit"
+    "view"
   ],
   "properties": {
     "schema_version": {
@@ -30,11 +29,6 @@
     },
     "view": {
       "const": "district_dispatch_summary"
-    },
-    "limit": {
-      "type": "integer",
-      "minimum": 1,
-      "maximum": 20
     }
   }
 }

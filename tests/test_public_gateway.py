@@ -27,6 +27,8 @@ sys.path.insert(0, str(ROOT / "public_shell"))
 from aws_task_client import IsolatedTaskSigner, signed_request, NoSignedRedirect, validate_api_endpoint
 
 from serve_public_blackbox_gateway import (
+    DEFAULT_BLACKBOX_URL,
+    build_request,
     canonical_json,
     fetch_blackbox_result,
     validate_blackbox_response,
@@ -35,8 +37,9 @@ from serve_public_blackbox_gateway import (
     validate_recent_timestamp,
     validate_sealed_result,
     validate_task_event_request,
-    CloudTaskStore, CloudUnavailable, validate_task_base, parse_args,
+    CloudTaskStore, CloudUnavailable, TaskStore, validate_task_base, parse_args,
 )
+from contract_samples import contract_only_sealed_result, task_store_seed
 
 
 def free_port() -> int:
@@ -50,6 +53,11 @@ class PublicGatewayTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.port = free_port()
         self.base = f"http://127.0.0.1:{self.port}"
+        self.database = Path(self.temp.name) / "task.sqlite3"
+        self.assertEqual(
+            2,
+            TaskStore(self.database, ROOT).seed_result(task_store_seed()),
+        )
         self.process = subprocess.Popen(
             [
                 sys.executable,
@@ -65,15 +73,9 @@ class PublicGatewayTests(unittest.TestCase):
                 "--directory",
                 str(ROOT),
                 "--task-db",
-                str(Path(self.temp.name) / "task.sqlite3"),
+                str(self.database),
                 "--public-base-url",
                 self.base,
-                "--offline-fixture",
-                str(
-                    ROOT
-                    / "fixtures"
-                    / "sealed.json"
-                ),
             ],
             cwd=ROOT,
             stdout=subprocess.DEVNULL,
@@ -85,7 +87,7 @@ class PublicGatewayTests(unittest.TestCase):
                 self.fail("gateway exited early")
             try:
                 with request.urlopen(
-                    self.base + "/api/health",
+                    self.base + "/api/handoff/health",
                     timeout=0.2,
                 ) as response:
                     if response.status == 200:
@@ -107,18 +109,23 @@ class PublicGatewayTests(unittest.TestCase):
         ) as response:
             return json.loads(response.read().decode("utf-8"))
 
-    def test_offline_result_task_and_qr(self) -> None:
-        result = self.get_json("/api/blackbox/result")
-        self.assertEqual(
-            "SEALED_DEMO_FIXTURE",
-            result["runtime_mode"],
-        )
+    def get_error_json(self, path: str) -> tuple[int, dict]:
+        try:
+            self.get_json(path)
+        except error.HTTPError as exc:
+            return exc.code, json.loads(exc.read().decode("utf-8"))
+        self.fail(f"expected HTTP error for {path}")
+
+    def test_unconfigured_blackbox_fails_closed_but_task_ledger_is_readable(self) -> None:
+        code, result = self.get_error_json("/api/blackbox/result")
+        self.assertEqual(503, code)
+        self.assertEqual("blackbox_unavailable", result["error"])
         tasks = self.get_json("/api/handoff/tasks")["tasks"]
-        self.assertEqual(6, len(tasks))
+        self.assertEqual(2, len(tasks))
         task_id = tasks[0]["task_id"]
         self.assertIsNotNone(tasks[0]["expires_at"])
         detail = self.get_json("/api/handoff/tasks/" + task_id)
-        self.assertEqual("SEALED_DEMO_FIXTURE", detail["source_mode"])
+        self.assertIsNone(detail["source_mode"])
         self.assertEqual(
             tasks[0]["expires_at"],
             detail["task"]["expires_at"],
@@ -133,16 +140,18 @@ class PublicGatewayTests(unittest.TestCase):
             body = response.read()
         self.assertIn(b"<svg", body)
         self.assertNotIn(b"127.0.0.1:8781", body)
+        self.assertNotIn(b"127.0.0.1:8782", body)
 
     def test_blackbox_result_get_is_read_only(self) -> None:
-        database = Path(self.temp.name) / "task.sqlite3"
-        with closing(sqlite3.connect(database)) as conn:
+        with closing(sqlite3.connect(self.database)) as conn:
             before = conn.execute(
                 "SELECT task_id,status,accepted_at,arrived_at,updated_at FROM task ORDER BY task_id"
             ).fetchall()
-        self.get_json("/api/blackbox/result")
-        self.get_json("/api/blackbox/result")
-        with closing(sqlite3.connect(database)) as conn:
+        for _ in range(2):
+            code, body = self.get_error_json("/api/blackbox/result")
+            self.assertEqual(503, code)
+            self.assertEqual("blackbox_unavailable", body["error"])
+        with closing(sqlite3.connect(self.database)) as conn:
             after = conn.execute(
                 "SELECT task_id,status,accepted_at,arrived_at,updated_at FROM task ORDER BY task_id"
             ).fetchall()
@@ -203,7 +212,7 @@ class PublicGatewayTests(unittest.TestCase):
                 request.urlopen(request.Request(self.base + path + "/events", data=body,
                                 headers={"Content-Type": "application/json"}), timeout=2)
         self.assertEqual("OPEN", self.get_json(path)["task"]["status"])
-        with closing(sqlite3.connect(Path(self.temp.name) / "task.sqlite3")) as conn:
+        with closing(sqlite3.connect(self.database)) as conn:
             self.assertEqual(0, conn.execute("SELECT COUNT(*) FROM task_event").fetchone()[0])
             audits = conn.execute("SELECT * FROM task_attempt").fetchall()
             self.assertEqual(2, len(audits))
@@ -224,12 +233,13 @@ class PublicGatewayTests(unittest.TestCase):
         self.assertNotIn("crypto.subtle", source)
         self.assertIn('grant.get("device_hash")', source)
 
-    def test_safe_integration_status_has_only_display_fields(self) -> None:
-        status = self.get_json("/api/integration/status")
-        self.assertEqual("SEALED_DEMO_FIXTURE", status["source_mode"])
+    def test_integration_status_is_degraded_without_real_mediator(self) -> None:
+        code, status = self.get_error_json("/api/integration/status")
+        self.assertEqual(503, code)
+        self.assertEqual("degraded", status["health"])
+        self.assertEqual("unavailable", status["source_mode"])
+        self.assertFalse(status["new_decisions"])
         self.assertEqual("local", status["task_backend"])
-        self.assertEqual(29, len(status["districts"]))
-        self.assertEqual({"district", "priority_level", "suggested_action"}, set(status["districts"][0]))
 
     def test_cloud_mode_boundary_and_signer_failure(self) -> None:
         self.assertEqual("https://example.test/stage", validate_task_base("https://example.test/stage/", cloud=True))
@@ -373,8 +383,7 @@ class PublicGatewayTests(unittest.TestCase):
             "--bind", "127.0.0.1", "--port", str(cloud_port), "--task-backend", "cloud",
             "--task-db", str(forbidden_db), "--public-task-base-url", "https://abc1234567.execute-api.us-west-2.amazonaws.com/stage",
             "--aws-session-dir", str(Path(self.temp.name) / "missing-session"),
-            "--aws-profile", "explicit-test-profile", "--aws-region", "us-west-2",
-            "--offline-fixture", str(ROOT / "fixtures/sealed.json")], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            "--aws-profile", "explicit-test-profile", "--aws-region", "us-west-2"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         try:
             for _ in range(80):
                 if child.poll() is not None:
@@ -393,12 +402,12 @@ class PublicGatewayTests(unittest.TestCase):
             body = json.loads(unavailable.exception.read())
             self.assertFalse(body["fallback"])
             self.assertEqual("cloud", body["task_backend"])
-            with request.urlopen(
-                f"http://127.0.0.1:{cloud_port}/api/blackbox/result",
-                timeout=2,
-            ) as response:
-                result = json.loads(response.read())
-            self.assertEqual("SEALED_DEMO_FIXTURE", result["runtime_mode"])
+            with self.assertRaises(error.HTTPError) as blackbox_unavailable:
+                request.urlopen(
+                    f"http://127.0.0.1:{cloud_port}/api/blackbox/result",
+                    timeout=2,
+                )
+            self.assertEqual(503, blackbox_unavailable.exception.code)
             self.assertFalse(forbidden_db.exists())
         finally:
             child.terminate()
@@ -429,7 +438,7 @@ class PublicGatewayTests(unittest.TestCase):
         self.assertEqual("https://api.example.test", args.task_cloud_url)
         self.assertEqual("us-west-2", args.aws_region)
         self.assertEqual("explicit-test-profile", args.aws_profile)
-        with self.assertRaisesRegex(ValueError, "cloud_resource_region_must_be_us_west_2"):
+        with self.assertRaisesRegex(ValueError, "cloud_resource_region_mismatch"):
             CloudTaskStore("https://abc1234567.execute-api.eu-west-1.amazonaws.com", "https://example.test", None, "eu-west-1", "explicit-test-profile")
 
     @unittest.skipUnless(shutil.which("node"), "Node.js required for browser script harness")
@@ -464,60 +473,46 @@ async function run(target, backend) {
             with self.assertRaisesRegex(RuntimeError, "aws_cli_unavailable"):
                 signer.credentials()
 
-    def test_root_redirect_loads_relative_assets(self) -> None:
-        with request.urlopen(
-            self.base + "/",
-            timeout=2,
-        ) as response:
-            html = response.read().decode("utf-8")
-            self.assertEqual(
-                "/public_shell/index.html",
-                response.url.removeprefix(self.base),
-            )
-        self.assertIn("./styles.css", html)
-        with self.assertRaises(error.HTTPError) as missing:
-            request.urlopen(self.base + "/missing", timeout=2)
-        self.assertEqual("no-store", missing.exception.headers["Cache-Control"])
-        with request.urlopen(
-            self.base + "/public_shell/styles.css",
-            timeout=2,
-        ) as response:
-            self.assertEqual(200, response.status)
-        with request.urlopen(
-            self.base + "/public_shell/app.js",
-            timeout=2,
-        ) as response:
-            self.assertEqual(200, response.status)
+    def test_gateway_does_not_serve_an_alternate_dashboard(self) -> None:
+        removed_paths = {
+            "/": 410,
+            "/controller/": 404,
+            "/controller/app.js": 404,
+            "/controller/styles.css": 404,
+            "/public_shell/index.html": 404,
+            "/public_shell/app.js": 404,
+            "/public_shell/styles.css": 404,
+            "/missing": 404,
+        }
+        for path, expected_status in removed_paths.items():
+            with self.subTest(path=path):
+                with self.assertRaises(error.HTTPError) as removed:
+                    request.urlopen(self.base + path, timeout=2)
+                self.assertEqual(expected_status, removed.exception.code)
+                self.assertEqual(
+                    "no-store",
+                    removed.exception.headers["Cache-Control"],
+                )
 
-    def test_index_allows_only_explicit_offline_query(self) -> None:
-        with request.urlopen(
-            self.base + "/public_shell/index.html?mode=offline",
-            timeout=2,
-        ) as response:
-            self.assertEqual(200, response.status)
-        with self.assertRaises(error.HTTPError) as blocked:
-            request.urlopen(
-                self.base + "/public_shell/index.html?mode=live",
-                timeout=2,
-            )
-        self.assertEqual(404, blocked.exception.code)
+    def test_blackbox_request_has_no_fixed_case_limit(self) -> None:
+        payload = build_request()
+        self.assertNotIn("limit", payload)
+        self.assertEqual(
+            "district_dispatch_summary",
+            payload["view"],
+        )
 
-    def test_task_page_allows_only_valid_task_query(self) -> None:
+    def test_task_page_allows_only_canonical_task_path(self) -> None:
         tasks = self.get_json("/api/handoff/tasks")["tasks"]
         task_id = tasks[0]["task_id"]
         with request.urlopen(
-            self.base
-            + "/public_shell/task.html?task_id="
-            + task_id,
+            self.base + "/tasks/" + task_id,
             timeout=2,
         ) as response:
             self.assertEqual(200, response.status)
         with self.assertRaises(error.HTTPError) as blocked:
             request.urlopen(
-                self.base
-                + "/public_shell/task.html?task_id="
-                + task_id
-                + "&extra=1",
+                self.base + "/public_shell/task.html?task_id=" + task_id,
                 timeout=2,
             )
         self.assertEqual(404, blocked.exception.code)
@@ -571,28 +566,12 @@ async function run(target, backend) {
                     )
 
     def test_stale_live_result_is_rejected(self) -> None:
-        live = deepcopy(
-            json.loads(
-                (ROOT / "fixtures" / "sealed.json").read_text(
-                    encoding="utf-8"
-                )
-            )
-        )
-        live["runtime_mode"] = "LIVE_LOCAL_SANDBOX"
+        live = contract_only_sealed_result()
         live["generated_at"] = (
             datetime.now(timezone.utc) - timedelta(hours=2)
         ).astimezone(
             timezone(timedelta(hours=8))
         ).isoformat(timespec="seconds")
-        live["demo_scope"]["data_class"] = (
-            "sealed_blackbox_result"
-        )
-        live["demo_scope"]["public_claim"] = (
-            "private_algorithm_attached"
-        )
-        live["proof_boundary"]["signature_policy"] = (
-            "integrity_hash_only"
-        )
         with self.assertRaisesRegex(
             ValueError,
             "live_result_generated_at_stale",
@@ -600,11 +579,7 @@ async function run(target, backend) {
             validate_sealed_result(live)
 
     def valid_wrapped_response(self, now: datetime) -> dict:
-        result = deepcopy(
-            json.loads(
-                (ROOT / "fixtures" / "sealed.json").read_text(encoding="utf-8")
-            )
-        )
+        result = contract_only_sealed_result(now=now)
         return {
             "schema_version": "youbike.blackbox_response.v1",
             "request_id": "req-123456789abc",
@@ -616,7 +591,7 @@ async function run(target, backend) {
         }
 
     def test_blackbox_response_is_full_schema_fail_closed(self) -> None:
-        now = datetime(2026, 9, 10, 12, 0, tzinfo=timezone.utc)
+        now = datetime.now(timezone.utc)
         valid = self.valid_wrapped_response(now)
         self.assertEqual(
             valid["result"],
@@ -696,7 +671,7 @@ class TaskPhoneUiTests(unittest.TestCase):
             args = parse_args()
         self.assertEqual("explicit-test-profile", args.aws_profile)
         self.assertEqual("us-west-2", args.aws_region)
-        with self.assertRaisesRegex(ValueError, "cloud_resource_region_must_be_us_west_2"):
+        with self.assertRaisesRegex(ValueError, "cloud_resource_region_mismatch"):
             CloudTaskStore("https://abc1234567.execute-api.eu-west-1.amazonaws.com", "https://example.test", None, "eu-west-1", "explicit-test-profile")
 
     def test_global_profile_export_is_explicit_and_does_not_inject_session_paths(self) -> None:

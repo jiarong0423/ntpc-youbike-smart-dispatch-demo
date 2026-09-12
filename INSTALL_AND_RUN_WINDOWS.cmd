@@ -3,7 +3,7 @@ setlocal EnableExtensions DisableDelayedExpansion
 cd /d "%~dp0"
 
 set "MODE=%~1"
-if "%MODE%"=="" set "MODE=offline"
+if "%MODE%"=="" set "MODE=live"
 if not "%~2"=="" set "PUBLIC_HOST=%~2"
 
 set "STATE_DIR=%LOCALAPPDATA%\NTPCYouBikeVenue"

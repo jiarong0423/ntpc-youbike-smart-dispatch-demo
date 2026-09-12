@@ -3,10 +3,10 @@ setlocal EnableExtensions DisableDelayedExpansion
 cd /d "%~dp0.."
 
 set "MODE=%~1"
-if "%MODE%"=="" set "MODE=offline"
+if "%MODE%"=="" set "MODE=live"
 if not "%~2"=="" set "PUBLIC_HOST=%~2"
 if not defined TASK_BACKEND set "TASK_BACKEND=local"
-if /I not "%MODE%"=="offline" if /I not "%MODE%"=="live" goto usage
+if /I not "%MODE%"=="live" goto usage
 if /I not "%TASK_BACKEND%"=="local" if /I not "%TASK_BACKEND%"=="cloud" goto usage
 if /I "%TASK_BACKEND%"=="cloud" if not defined YOUBIKE_AWS_PROFILE (
   echo Cloud mode requires YOUBIKE_AWS_PROFILE to be explicitly set.
@@ -46,31 +46,27 @@ set "PUBLIC_HOST=%LAN_ADDRESS%"
 set "PUBLIC_TASK_BASE_URL=http://%PUBLIC_HOST%:8084"
 
 :url_ready
-set "SOURCE_ARGS="
-if /I "%MODE%"=="offline" set "SOURCE_ARGS=--offline-fixture fixtures\sealed.json"
-if /I "%MODE%"=="offline" goto source_ready
 if not defined YOUBIKE_BLACKBOX_CREDENTIAL_FILE set "YOUBIKE_BLACKBOX_CREDENTIAL_FILE=%CREDENTIAL_FILE%"
 if not exist "%YOUBIKE_BLACKBOX_CREDENTIAL_FILE%" (
   echo Live mode credential file is missing. Configure YOUBIKE_BLACKBOX_CREDENTIAL_FILE.
   exit /b 2
 )
 if not defined YOUBIKE_BLACKBOX_REGISTRY_DIR set "YOUBIKE_BLACKBOX_REGISTRY_DIR=%REGISTRY_DIR%"
-if not defined YOUBIKE_BLACKBOX_URL set "YOUBIKE_BLACKBOX_URL=http://127.0.0.1:8781/api/v1/dispatch/evaluate"
+if not defined YOUBIKE_BLACKBOX_URL set "YOUBIKE_BLACKBOX_URL=http://127.0.0.1:8782/api/v1/dispatch/evaluate"
 
-:source_ready
 echo Task backend: %TASK_BACKEND%
-echo Local dashboard: http://localhost:8084/public_shell/index.html
+echo QR worker service: http://localhost:8084/tasks/TASK_ID
 if /I "%TASK_BACKEND%"=="cloud" goto cloud_runtime
 set "TASK_DB=%STATE_DIR%\data\sqlite\task-ledger.sqlite3"
-"%VENV_DIR%\Scripts\python.exe" public_shell\serve_public_blackbox_gateway.py --bind 0.0.0.0 --port 8084 --directory . --task-backend local --task-db "%TASK_DB%" --public-task-base-url "%PUBLIC_TASK_BASE_URL%" %SOURCE_ARGS%
+"%VENV_DIR%\Scripts\python.exe" public_shell\serve_public_blackbox_gateway.py --bind 0.0.0.0 --port 8084 --directory . --task-backend local --task-db "%TASK_DB%" --public-task-base-url "%PUBLIC_TASK_BASE_URL%"
 exit /b %errorlevel%
 
 :cloud_runtime
-"%VENV_DIR%\Scripts\python.exe" public_shell\serve_public_blackbox_gateway.py --bind 0.0.0.0 --port 8084 --directory . --task-backend cloud --aws-profile "%YOUBIKE_AWS_PROFILE%" --aws-region "%YOUBIKE_AWS_REGION%" --public-task-base-url "%PUBLIC_TASK_BASE_URL%" %SOURCE_ARGS%
+"%VENV_DIR%\Scripts\python.exe" public_shell\serve_public_blackbox_gateway.py --bind 0.0.0.0 --port 8084 --directory . --task-backend cloud --aws-profile "%YOUBIKE_AWS_PROFILE%" --aws-region "%YOUBIKE_AWS_REGION%" --public-task-base-url "%PUBLIC_TASK_BASE_URL%"
 exit /b %errorlevel%
 
 :usage
-echo Usage: start_windows.cmd offline^|live [LAN-IP]
+echo Usage: start_windows.cmd live [LAN-IP]
 echo TASK_BACKEND must be local or cloud. PUBLIC_TASK_BASE_URL overrides LAN-IP detection.
 echo Cloud mode also requires explicit YOUBIKE_AWS_PROFILE and uses YOUBIKE_AWS_REGION=us-west-2.
 exit /b 2

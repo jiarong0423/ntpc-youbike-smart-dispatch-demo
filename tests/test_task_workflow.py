@@ -4,7 +4,6 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
 from datetime import datetime, timedelta, timezone
 import hashlib
-import json
 from pathlib import Path
 import sqlite3
 import sys
@@ -15,7 +14,8 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "public_shell"))
-from task_ledger import TaskStore
+from task_ledger import TASK_OPEN_TTL_SECONDS, TaskStore
+from contract_samples import task_store_seed
 
 
 class TaskWorkflowTests(unittest.TestCase):
@@ -23,9 +23,9 @@ class TaskWorkflowTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.db_path = Path(self.temp.name) / "task.sqlite3"
         self.store = TaskStore(self.db_path, ROOT)
-        self.fixture = json.loads((ROOT / "fixtures" / "sealed.json").read_text(encoding="utf-8"))
-        self.assertEqual(6, self.store.seed_result(self.fixture))
-        self.task_id = "task-banqiao-venue-dispatch"
+        self.contract_seed = task_store_seed()
+        self.assertEqual(2, self.store.seed_result(self.contract_seed))
+        self.task_id = "task-contract-primary"
 
     def tearDown(self) -> None:
         self.temp.cleanup()
@@ -75,7 +75,7 @@ class TaskWorkflowTests(unittest.TestCase):
         self.assertEqual(200, code)
         self.assertTrue(second["duplicate"])
         self.assertEqual((3, 0), self.counts())
-        self.store.seed_result(self.fixture)
+        self.store.seed_result(self.contract_seed)
         self.assertEqual("COMPLETED", TaskStore(self.db_path, ROOT).get_task(self.task_id)["status"])
 
     def test_committed_event_remains_idempotent_after_retry_window(self) -> None:
@@ -162,7 +162,7 @@ class TaskWorkflowTests(unittest.TestCase):
 
     def test_expired_task_and_other_process_signature_fail_closed(self) -> None:
         event = self.event()
-        with patch("task_ledger.time.time", return_value=time.time() + 301):
+        with patch("task_ledger.time.time", return_value=time.time() + TASK_OPEN_TTL_SECONDS + 1):
             event["occurred_at"] = datetime.fromtimestamp(
                 time.time(),
                 timezone.utc,
@@ -199,7 +199,7 @@ class TaskWorkflowTests(unittest.TestCase):
                 "SELECT status, updated_at FROM task WHERE task_id=?",
                 (self.task_id,),
             ).fetchone()
-        future = datetime.fromisoformat(stored["updated_at"]).timestamp() + 301
+        future = datetime.fromisoformat(stored["updated_at"]).timestamp() + TASK_OPEN_TTL_SECONDS + 1
         with patch("task_ledger.time.time", return_value=future):
             self.assertEqual(
                 "EXPIRED",
@@ -219,7 +219,7 @@ class TaskWorkflowTests(unittest.TestCase):
                 "SELECT updated_at FROM task WHERE task_id=?",
                 (self.task_id,),
             ).fetchone()[0]
-        future = datetime.fromisoformat(updated_at).timestamp() + 301
+        future = datetime.fromisoformat(updated_at).timestamp() + TASK_OPEN_TTL_SECONDS + 1
         event["occurred_at"] = datetime.fromtimestamp(
             future,
             timezone.utc,
@@ -252,11 +252,11 @@ class TaskWorkflowTests(unittest.TestCase):
     def test_accepted_task_is_not_expired_or_reseeded(self) -> None:
         self.accept(sequence=45)
         before = self.store.get_task(self.task_id)
-        self.store.seed_result(self.fixture)
+        self.store.seed_result(self.contract_seed)
         after = self.store.get_task(self.task_id)
         future = datetime.fromisoformat(
             before["updated_at"]
-        ).timestamp() + 301
+        ).timestamp() + TASK_OPEN_TTL_SECONDS + 1
         with patch("task_ledger.time.time", return_value=future):
             delayed = self.store.get_task(self.task_id)
         self.assertEqual(before, after)
@@ -269,7 +269,7 @@ class TaskWorkflowTests(unittest.TestCase):
             conn.execute("DELETE FROM task WHERE task_id=?", (self.task_id,))
             conn.commit()
         self.assertEqual(404, self.store.apply_event(self.task_id, event)[0])
-        self.store.seed_result(self.fixture)
+        self.store.seed_result(self.contract_seed)
         with closing(self.store.connect()) as conn:
             conn.execute("UPDATE task SET action_label='observe' WHERE task_id=?", (self.task_id,))
             conn.commit()

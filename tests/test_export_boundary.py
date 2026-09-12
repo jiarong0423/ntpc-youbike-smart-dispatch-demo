@@ -43,6 +43,14 @@ PRIVATE_ALGORITHM_PATTERNS = (
     re.compile(r"\b(?:weight|threshold|coefficient)\s*=", re.IGNORECASE),
     re.compile(r"\b(?:score|rank)_station\s*\(", re.IGNORECASE),
 )
+REMOVED_DASHBOARD_PATHS = {
+    "controller",
+    "public_shell/index.html",
+    "public_shell/app.js",
+    "public_shell/styles.css",
+    "public_shell/media",
+    "fixtures/sealed.json",
+}
 
 
 def manifest_relative_path(path: PurePath, root: PurePath) -> str:
@@ -96,6 +104,7 @@ class ExportBoundaryTests(unittest.TestCase):
             if (
                 path.is_file()
                 and ".git" not in path.parts
+                and ".venv" not in path.parts
                 and "__pycache__" not in path.parts
                 and path.name not in ignored_names
                 and path.suffix.lower() != ".pyc"
@@ -129,36 +138,36 @@ class ExportBoundaryTests(unittest.TestCase):
         ]
         self.assertEqual([], offenders)
 
-    def test_windows_offline_fixture_exists(self) -> None:
-        launcher = (
-            ROOT / "public_shell" / "start_windows.cmd"
-        ).read_text(encoding="utf-8")
-        self.assertIn(
-            r"--offline-fixture fixtures\sealed.json",
-            launcher,
+    def test_public_page_topology_and_data_lineage_are_explicit(self) -> None:
+        index = (ROOT / "PAGE_AND_WORKSPACE_INDEX.md").read_text(
+            encoding="utf-8"
         )
-        self.assertTrue((ROOT / "fixtures" / "sealed.json").is_file())
-
-    def test_public_data_lineage_is_explicit(self) -> None:
-        index = (
-            ROOT / "public_shell" / "index.html"
-        ).read_text(encoding="utf-8")
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
-        historical = (
-            ROOT / "public_shell" / "media" / "historical-coverage.svg"
-        ).read_text(encoding="utf-8")
-        self.assertIn("2026-01 至 2026-09-11", index)
-        self.assertIn("2026-09-08 19:16 至 2026-09-11 01:38", index)
-        self.assertIn("本次重點區", index)
-        self.assertIn("313 批", index)
-        self.assertIn("1,606 站點維度", index)
-        self.assertIn('id="lineage-mode"', index)
-        self.assertIn('id="lineage-freshness"', index)
-        self.assertIn("欄位縮減、區間化與時間位移處理的 29 區固定資料", readme)
-        self.assertIn("區間化", historical)
-        self.assertIn("時間錯位", historical)
-        self.assertIn("不能還原單站或精確比例", historical)
-        self.assertNotRegex(historical, r">\d+\.\d+%</text>")
+        self.assertIn(
+            "/docs/hackathon/2026Q3/"
+            "youbike_district_traffic_light_frontend_demo_20260816.html",
+            index,
+        )
+        self.assertIn("三個既有分頁", index)
+        self.assertIn("tasks/{task_id}", index)
+        self.assertIn("不得提供替代控制台", index)
+        self.assertIn("真實 LIVE", index)
+        self.assertIn(
+            "2026 年 1 至 9 月的輕量特徵快照與天氣特徵",
+            readme,
+        )
+        self.assertIn(
+            "單一影子觀察窗持續接收近期站點與天氣流入",
+            readme,
+        )
+
+    def test_removed_dashboard_and_fixture_paths_stay_absent(self) -> None:
+        offenders = [
+            relative
+            for relative in sorted(REMOVED_DASHBOARD_PATHS)
+            if (ROOT / relative).exists()
+        ]
+        self.assertEqual([], offenders)
 
     def test_no_local_paths_secrets_or_algorithm_formulas(self) -> None:
         findings = []

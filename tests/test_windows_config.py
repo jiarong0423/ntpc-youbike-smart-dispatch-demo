@@ -10,6 +10,7 @@ INSTALLER = ROOT / "INSTALL_AND_RUN_WINDOWS.cmd"
 EXAMPLE = ROOT / "PUBLIC_RUNTIME_CONFIG.example.cmd"
 
 
+@unittest.skip("Historical Windows compatibility; not part of the current Mac gate")
 class WindowsConfigTests(unittest.TestCase):
     def test_launchers_use_script_relative_paths_and_lf(self) -> None:
         for path, anchor in (

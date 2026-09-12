@@ -1,92 +1,154 @@
-# Architecture And Delivery Boundary
+# LIVE Architecture And Delivery Boundary
 
-## Competition Runtime
+## Locked Current Architecture
 
 ```mermaid
 flowchart LR
-  subgraph LOCAL["Windows private boundary"]
-    INPUT["History, snapshots and weather"] --> ENGINE["Private black box / loopback only"]
-    ENGINE -->|"Validated sanitized contract"| SYNC["Single-writer sync"]
-    FIXTURE["Explicit offline fixture / not realtime"] --> SYNC
-    SYNC -->|"1. Seed result-derived tasks"| MODE{"TASK_BACKEND"}
-    SYNC -->|"2. Publish committed regional snapshot"| BFF["Public BFF"]
-    BFF --> UI["Dispatch workspace"]
-    BFF --> MODE
-    MODE -->|"local only"| SQLITE["SQLite outside repo / OPEN, EXPIRED or COMPLETED"]
-    SQLITE --> LANQR["Detected or explicit LAN IPv4 /tasks/id"]
+  subgraph INPUT["Data input"]
+    LIVE["單一影子 LIVE 流入<br/>站點與天氣觀察窗"]
+    HISTORY["2026 年 1–9 月<br/>輕量歷史特徵快照"]
+    WEATHER["天氣與時間週期基準"]
   end
-  subgraph CLOUD["AWS target / deployment verification required"]
-    API["API Gateway HTTPS"] --> LAMBDA["Lambda target / accept, arrive and complete contract"]
-    LAMBDA --> DDB["DynamoDB / cloud authority"]
-    DDB -. "Planned retryable audit mirror" .-> SHEET["Google Sheets / pending"]
-    LAMBDA -. "Planned sanitized explanation" .-> BEDROCK["Bedrock / separate acceptance"]
+
+  subgraph PRIVATE["Mac private boundary"]
+    CORE["8781 私有核心<br/>特徵比較與派工推論"]
+    MEDIATOR["8782 去敏中介<br/>schema / freshness / allowlist / hash"]
   end
-  MODE -->|"cloud / explicit AWS profile / us-west-2 / no local SQLite"| API
-  UI -->|"PUBLIC_TASK_BASE_URL HTTPS /tasks/id"| PHONE["Phone on 4G or 5G"]
-  PHONE --> API
-  LANQR --> WIFI["Phone on same Wi-Fi / signed local grant"]
-  API -->|"Authoritative response; fail closed on errors"| UI
+
+  subgraph CLOUD["AWS authoritative task plane"]
+    API["API Gateway HTTPS"]
+    AUTH["AWS Authorizer<br/>dispatcher session / task capability"]
+    LAMBDA["Lambda<br/>驗證、冪等與狀態轉移"]
+    DDB["DynamoDB<br/>唯一原子任務帳本"]
+    SHEET["Google Sheets<br/>派工單、手機事件、狀態對帳鏡像"]
+    BEDROCK["Amazon Bedrock<br/>安全摘要說明層"]
+  end
+
+  subgraph EXPERIENCE["Public experience"]
+    OP["已授權調度員"]
+    CONSOLE["主控台單一 URL<br/>三分頁"]
+    QR["短期單任務 QR"]
+    TASK["獨立順向派工 HTML<br/>單一任務視野"]
+  end
+
+  LIVE --> CORE
+  HISTORY --> CORE
+  WEATHER --> CORE
+  CORE --> MEDIATOR
+  MEDIATOR --> API
+  API --> AUTH
+  AUTH --> LAMBDA
+  LAMBDA --> DDB
+  DDB --> LAMBDA
+  LAMBDA --> API
+  OP -->|"調度員授權"| CONSOLE
+  API --> CONSOLE
+  CONSOLE -->|"請求單任務 capability"| API
+  CONSOLE --> QR
+  QR --> TASK
+  API --> TASK
+  TASK -->|"任務事件"| API
+  DDB -. "非權威、可重建" .-> SHEET
+  LAMBDA -. "安全摘要" .-> BEDROCK
+  BEDROCK -. "作業說明，不改決策" .-> CONSOLE
+
+  classDef active fill:#e8f3ff,stroke:#2563eb,color:#111827;
+  classDef private fill:#fff2cc,stroke:#a16207,color:#111827;
+  classDef pending fill:#fff7ed,stroke:#ea580c,color:#111827,stroke-dasharray:5 3;
+  classDef mirror fill:#f3e8ff,stroke:#7e22ce,color:#111827;
+  class LIVE,HISTORY,WEATHER,CONSOLE active;
+  class CORE,MEDIATOR private;
+  class API,AUTH,LAMBDA,DDB,QR,TASK,BEDROCK pending;
+  class SHEET mirror;
 ```
 
-`TASK_BACKEND=local` creates only the external local ledger; `TASK_BACKEND=cloud` uses the AWS task API and never creates a fallback local task ledger. Offline/live selects result provenance independently from task storage. `PUBLIC_TASK_BASE_URL` preserves an explicit operator URL; local auto-detection requires exactly one usable IPv4 and stops on ambiguity. AWS HTTPS URLs may include a stage prefix, followed by `/tasks/{task_id}`. The cloud API can be separately configured with `TASK_CLOUD_API_URL`. Cloud mode requires an explicit `YOUBIKE_AWS_PROFILE`; every YouBike resource request is explicitly signed for `YOUBIKE_AWS_REGION=us-west-2`, independent of the profile's login-region setting.
+Current critical path 是：
 
-These boundaries describe the local implementation and the proposed deployment target. Actual AWS deployment, cloud authentication, target Windows device and cellular QR acceptance require independent evidence. Sheets mirroring and Bedrock explanation are separate pending integrations. Local completion is never evidence of AWS confirmation.
+`Mac 單一影子 LIVE 流入 → 8781 → 8782 → API Gateway → Lambda → DynamoDB → 前端／手機`。
 
-The local public application implements the accept-to-arrive-to-complete state machine. `accepted_at` and `arrived_at` record separate transitions while `status` remains `OPEN` until completion. An unaccepted task becomes `EXPIRED` after five minutes; an accepted task is protected from expiry and later result seeding. Exception events remain audit-only and do not advance either transition. The private engine supplies only contract-bound results and does not send formulas, weights, exact scores or source databases to the browser.
+Google Sheets 位於 DynamoDB 之後，只做對帳鏡像。Current 只有 Mac LIVE 主線，不存在第二套執行模式。
 
-Live result retrieval is single-writer and read-only from the browser perspective. The background synchronizer validates one black-box generation, seeds its derived tasks, and only then publishes the same generation as the committed regional snapshot. Browser GET requests never seed tasks or fetch a newer generation. A missing snapshot or a live committed snapshot older than 90 seconds fails closed. The AWS task-seeding endpoint still requires an independently verified atomic batch contract before cloud deployment can claim the same all-or-nothing guarantee.
+## Layer Responsibilities
+
+| Layer | Responsibility | Forbidden responsibility |
+| --- | --- | --- |
+| 單一影子 LIVE 流入 | 收集近期站點與天氣，維持一個 current 觀察窗 | 同時啟動第二條原始收集線 |
+| 1–9 月輕量基準 | 提供時間週期、區域與天氣特徵比較 | 提供前端逐站原始歷史列 |
+| `8781` 私有核心 | 比較特徵、產生優先級與派工候選 | 對外公開公式、權重、分數或原始資料 |
+| `8782` 去敏中介 | 驗 schema、新鮮度、hash、欄位白名單並重建安全 payload | 讓未知欄位或任意黑箱文字直接穿透 |
+| API Gateway | 提供固定 HTTPS 邊界與路由 | 持有核心演算法或瀏覽器憑證 |
+| AWS Authorizer | 區分調度員 session 與短期單任務 capability | 讓手機 capability 取得主控台權限 |
+| Lambda | 驗證請求、執行冪等狀態轉移與授權 | 以 Google Sheets 作競態控制 |
+| DynamoDB | 任務、事件及狀態的唯一原子權威 | 依賴 Sheet 寫入成功才提交狀態 |
+| Google Sheets | 顯示派工單、手機事件及 DynamoDB 對帳結果 | 成為原子狀態權威或回寫推翻 DynamoDB |
+| 調度員主控台 | 單一 URL 內的區域態勢、派工任務、證據對帳三分頁 | 對未授權使用者或手機 capability 開放 |
+| 順向派工 HTML | 顯示單一任務並提交完成／異常事件 | 連回主控台、列舉其他任務或顯示黑箱／AWS 資訊 |
+| Bedrock | 將安全摘要改寫為現場作業說明 | 參與優先級、車種或任務決策 |
+
+## Data Publication Contract
+
+8782 之後只允許結果導向欄位，例如：
+
+- contract、publication 與 schema 版本。
+- 結果產生時間、來源快照時間、天氣基準時間及新鮮度。
+- 行政區識別、優先級帶、信心帶及建議行動。
+- 任務識別、任務狀態、失效時間及安全交接摘要。
+- 經固定模板產生的 reason tags 與 policy flags。
+
+8782 必須拒絕：
+
+- 站點 ID、站名、地址、座標及逐站精確數量。
+- 精確分數、數字排名、權重、閾值、特徵矩陣、公式及原始天氣值。
+- 原始歷史列、檔案路徑、來源 URL、錯誤堆疊與 runtime 內部資訊。
+- 裝置原始指紋、Token、憑證、AWS session 或任何未列入白名單的欄位。
+
+## Atomic Task Semantics
+
+1. 8782 驗證通過後，AWS 才能接收 publication。
+2. Lambda 以 publication ID、task ID、event ID 與條件式寫入維持冪等。
+3. 舊 publication 必須拒絕；同 publication 與同 hash 是 no-op；同 publication 與不同 hash 必須拒絕。
+4. 任務狀態只能依公開契約前進，非法跳級與重複提交不能造成第二次更新。
+5. DynamoDB 成功提交後才回應前端成功。
+6. Sheets 同步是提交後的可重試副作用；同步失敗只產生待對帳狀態，不回滾 DynamoDB。
+7. 任一來源、契約、認證或完整性閘門失敗時，Current LIVE 路徑 fail-closed。
+
+## Frontend Read Boundary
+
+調度員主控台只讀取 AWS API 提供的安全區域摘要、任務與事件結果。它不直接連線 `8781`、`8782`、SQLite 檔案或影子觀察目錄，也不載入 2,000 萬筆以上的原始資料。
+
+1–9 月歷史資料先轉成輕量特徵與天氣基準，再由 `8781` 與當前觀察窗比較。大型歷史 archive 是私有還原資產，不是前端 runtime dependency。
+
+## Frontend Authorization Boundary
+
+1. 主控台只有一個 URL，內含區域態勢、派工任務、證據對帳三個分頁；三個分頁共用同一個已驗證調度員 session。
+2. AWS Authorizer 與 Lambda 必須在 server side 驗證調度員權限；前端隱藏分頁或按鈕不是安全控制。
+3. 主控台只能針對一張既有任務簽發短期、單任務、具 TTL 的 QR capability。
+4. QR 只能開啟獨立「順向派工 HTML」。允許欄位限於該任務區域、行動、順向路線／站點順序、TTL、目前狀態、完成與異常操作。
+5. 手機頁沒有主控台連結、其他 task ID、任務搜尋、任務池列表、黑箱資訊、AWS account/role/resource、內部 endpoint 或錯誤堆疊。
+6. 手機事件由 AWS 驗證 task ID、capability、TTL、event ID 與合法狀態轉移後，才以 DynamoDB 條件式寫入完成原子更新。
+7. Google Sheets 只接收 DynamoDB 已提交的派工、事件與狀態鏡像，不參與授權、原子提交或手機成功判定。
 
 ## Dispatch Vehicle Policy
 
-| Vehicle | Operational role | When selected | Explicit limit |
-| --- | --- | --- | --- |
-| Motorcycle | Fast field verification, station condition check and task handoff | A location needs quick confirmation before committing a larger crew | Does not transport bicycles |
-| Truck | Physical redistribution of bicycles | The approved task requires adding or removing multiple bicycles | Requires a confirmed loading target and handoff task |
-
-The private engine recommends a response class. The public task workflow records task completion; it does not expose the scoring formula.
-
-## Evidence-To-Action Cases
-
-| Evidence | Operational reading | Evidence-supported response | Claim boundary |
-| --- | --- | --- | --- |
-| Rain, heat and holiday bicycle-lane periods | Borrow and return duration can lengthen while turnover falls | Extend the observation window and prepare reserve bicycles | An observed association, not proof of a single cause |
-| Historical baseline versus recent snapshot drift | A district is moving away from its normal time pattern | Adjust the regional task queue and response class | Public output shows direction and bands, not the private score |
-| Rapid station growth after urban development | The previous station baseline no longer represents the new living circle | Update the station universe before recalculating district balance | New stations enter through a versioned update gate |
-| Jing'an transfer-area imbalance | Peak pressure may persist after ordinary redistribution | Compare electric-assist bicycle allocation with off-peak redistribution | A testable operating scenario, not an announced official policy |
-| Tourism and school calendar cycles | Holiday and term-time patterns differ from ordinary commute periods | Compare against the matching seasonal baseline before changing the task queue | The public package shows bands and direction, not causal weights |
-| Rivers, bridges and major-road barriers | Straight-line neighbours may not belong to the same reachable operating area | Prefer same-side living-circle balancing before cross-barrier movement | A reachability guard, not a claim of globally optimal routing |
-| Long-holiday field execution | Stranded or pending-replenishment bicycles need confirmation before bulk movement | Motorcycle first-response, then one-direction off-peak truck allocation | The motorcycle verifies and hands off; it does not carry bicycles |
-
-## Page And Workspace Index
-
-The executable page, API and evidence ownership table is maintained in [PAGE_AND_WORKSPACE_INDEX.md](PAGE_AND_WORKSPACE_INDEX.md).
-
-## Modes
-
-| Mode | Result source | Task and QR workflow | Claim |
-| --- | --- | --- | --- |
-| `LIVE_LOCAL_SANDBOX` | Operator-controlled Windows black-box API | Local workflow tested | Near-real-time only when source freshness and result contract both pass |
-| `SEALED_DEMO_FIXTURE` | Explicit field-reduced, intervalized fixed fixture | Local workflow tested | Offline demonstration only |
-| `PORTABLE_SEALED_FALLBACK` | Operator-provided sealed package | Local workflow tested | Fixed-time fallback, never realtime |
-| `AWS_EXPLANATION` | Sanitized district summary | Does not create or change dispatch decisions | Explanation layer only |
-
-## Data Publication Semantics
-
-| Layer | Public meaning | Not claimed |
+| Vehicle | Operational role | Selection boundary |
 | --- | --- | --- |
-| Historical coverage | 2026-01 through 2026-09-11; intervalized and time-shifted district-group trends | Not a raw database, current inventory, station-level reconstruction, or exact ratio series |
-| Dated compact snapshot | 2026-09-08 19:16 through 2026-09-11 01:38, 313 batches and 500,824 rows over a 1,606-station dimension | Completeness does not extend beyond that batch |
-| Weather and calendar evidence | Historical comparison of conditions and time periods | Not proof that weather alone caused a dispatch outcome |
-| Live black-box result | Near-real-time only when source timestamp, freshness, and schema validation pass | A healthy connection alone does not prove fresh data |
-| Field-reduced, intervalized fixed fixture | Operator-selected workflow demonstration | Never presented as a calculated or current result; transformation wording is not a security certification |
+| Motorcycle | 快速確認現況、滯留車、現場空間與交接條件 | 不搬運自行車，不代表已核准大量調度 |
+| Truck | 執行已確認的補車或拔車 | 必須有可稽核任務與明確搬運方向 |
 
-## Trust Boundaries
+私有核心決定 response class；公開任務流程只接收級別與建議行動，不公開評分公式。
 
-1. The dashboard calls the local BFF; cloud QR opens the configured AWS HTTPS task page and its same-origin API.
-2. The black-box bearer token remains in a file outside this repository.
-3. The private API is loopback-only on the venue computer.
-4. Local task mode creates SQLite outside this repository; cloud mode creates no local task database.
-5. Bedrock receives district aliases, bands, small counts, reason tags and policy flags only.
-6. Bedrock failure does not stop local dispatch, task creation or QR actions.
-7. Offline data is selected explicitly and is never an automatic fallback.
-8. AWS access requires an explicitly selected, syntactically valid CLI profile. The profile name is an operator selector; IAM least privilege and resource policies provide the actual authorization boundary.
+## Current Gates
+
+| Gate | Status | Release consequence |
+| --- | --- | --- |
+| 單一影子 LIVE 觀察窗 | Local evidence available | 每輪仍須通過 freshness 與完整性檢查 |
+| `8781` 私有核心 | Local smoke available | 只能 loopback 使用 |
+| `8782` 去敏中介 | Local smoke and contract tests available | AWS 不可繞過此層 |
+| API Gateway / Lambda / DynamoDB | **Pending acceptance** | 未通過前不能宣稱 AWS 任務主線完成 |
+| Google Sheets mirror | **Pending acceptance** | 未通過前不能宣稱雲端對帳完成 |
+| 手機 4G/5G 任務事件 | **Pending acceptance** | 瀏覽器或區網測試不能取代 |
+| Bedrock explanation | **Pending acceptance** | 不阻擋核心決策，但不得宣稱已完成生成式 AI 實測 |
+
+## Delivery Boundary
+
+Current competition delivery includes the LIVE system, presentation and proposal. GitHub provides the public implementation and contracts; the private algorithm remains behind `8781` and the enforced `8782` mediator.

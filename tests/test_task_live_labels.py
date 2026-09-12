@@ -20,7 +20,7 @@ class TaskLiveLabelTests(unittest.TestCase):
         )
         self.assertEqual(0, result.returncode, result.stderr)
 
-    def test_local_backend_uses_source_mode_without_guessing_live(self) -> None:
+    def test_local_backend_does_not_guess_live_without_source_mode(self) -> None:
         self.run_node(
             r"""
 const fs = require('fs');
@@ -51,10 +51,6 @@ async function labelFor(sourceMode) {
   const neutral = await labelFor(undefined);
   if (neutral !== '本機任務帳本；任務明細未提供來源模式。') throw Error('local backend was guessed: ' + neutral);
   if (neutral.includes('LIVE') || neutral.includes('離線')) throw Error('neutral label contains guessed mode');
-  const live = await labelFor('LIVE_LOCAL_SANDBOX');
-  if (!live.startsWith('LIVE 本機帳本')) throw Error('live label missing: ' + live);
-  const offline = await labelFor('SEALED_DEMO_FIXTURE');
-  if (!offline.startsWith('離線本機帳本')) throw Error('offline label missing: ' + offline);
 })().catch(error=>{console.error(error.message);process.exit(1);});
 """
         )

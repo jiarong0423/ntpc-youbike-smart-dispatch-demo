@@ -24,7 +24,6 @@
   function runtimeNotice(payload) {
     if (backend === "cloud") return "雲端 AWS 任務帳本；連線失敗不轉寫本機。";
     if (payload.source_mode === "LIVE_LOCAL_SANDBOX") return "LIVE 本機帳本；顯示已提交至本機任務帳本的狀態。";
-    if (payload.source_mode === "SEALED_DEMO_FIXTURE") return "離線本機帳本；此結果不代表 AWS 已同步。";
     return "本機任務帳本；任務明細未提供來源模式。";
   }
   function serverExpiryMillis(task) {

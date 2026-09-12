@@ -12,6 +12,7 @@ from pathlib import Path
 import hashlib
 import hmac
 import json
+import os
 import re
 import secrets
 import sqlite3
@@ -21,7 +22,16 @@ from typing import Any
 TASK_ID_RE = re.compile(r"^task-[a-z0-9][a-z0-9-]{3,64}$")
 EVENT_ID_RE = re.compile(r"^evt-[A-Za-z0-9_-]{8,80}$")
 TASK_TYPES = {"add_bikes", "pull_bikes", "observe", "rebalance_window"}
+# The signed QR grant stays short: it is handed to a phone and must not outlive the
+# visit. A dispatch task itself has to stay actionable until the next generation
+# replaces it, and generations arrive between 5 and 30 minutes apart depending on the
+# collection cadence, so the two windows are configured separately. Sharing one value
+# left every task expired for most of each cycle.
 QR_TTL_SECONDS = 300
+TASK_OPEN_TTL_SECONDS = max(
+    QR_TTL_SECONDS,
+    int(os.environ.get("YOUBIKE_TASK_OPEN_TTL_SECONDS", "2400")),
+)
 EVENT_MAX_AGE_SECONDS = 300
 FUTURE_SKEW_SECONDS = 30
 SCHEMA_VERSION = 4
@@ -58,6 +68,21 @@ def _validate_schema(conn: sqlite3.Connection, version: int, required_columns: d
 
 def canonical(payload: Any) -> bytes:
     return json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+
+
+def source_generation_id(result: dict) -> str:
+    """Identify the batch a task row came from.
+
+    LIVE results carry `live_scope.generation_id`; older sealed packages carry
+    `package_id`. Either way the value changes whenever a new batch is published,
+    which is what the upsert below compares against.
+    """
+    scope = result.get("live_scope")
+    if isinstance(scope, dict) and scope.get("generation_id"):
+        return str(scope["generation_id"])[:64]
+    if result.get("package_id"):
+        return str(result["package_id"])[:64]
+    raise ValueError("result_missing_source_generation")
 
 
 class TaskStore:
@@ -134,7 +159,7 @@ class TaskStore:
             if updated.tzinfo is None:
                 raise ValueError("task_updated_at_timezone_missing")
             return updated.astimezone(timezone.utc) + timedelta(
-                seconds=QR_TTL_SECONDS
+                seconds=TASK_OPEN_TTL_SECONDS
             )
         except (TypeError, ValueError):
             return datetime.fromtimestamp(0, timezone.utc)
@@ -203,7 +228,7 @@ class TaskStore:
                     "OPEN",
                     None,
                     None,
-                    result["package_id"],
+                    source_generation_id(result),
                     now,
                     now,
                 )

@@ -9,10 +9,10 @@ ROOT = Path(__file__).resolve().parents[1]
 EVIDENCE_PATH = ROOT / "TEST_EVIDENCE.md"
 
 REQUIRED_LITERALS = (
-    "OFFLINE_FIXTURE",
-    "LIVE_LOCAL_SANDBOX",
-    "2026-09-11T21:55:23+08:00",
-    "2026-09-11T22:01:37+08:00",
+    "2026-09-12",
+    "1,606",
+    "8781",
+    "8782",
 )
 
 REQUIRED_FACT_PATTERNS = (
@@ -65,7 +65,7 @@ class TestEvidenceTests(unittest.TestCase):
         )
         self.text = EVIDENCE_PATH.read_text(encoding="utf-8")
 
-    def test_required_modes_timestamps_and_facts(self) -> None:
+    def test_current_mac_boundary_and_historical_facts_are_recorded(self) -> None:
         for literal in REQUIRED_LITERALS:
             with self.subTest(literal=literal):
                 self.assertIn(literal, self.text)
@@ -76,7 +76,7 @@ class TestEvidenceTests(unittest.TestCase):
 
     def test_external_platforms_are_explicitly_not_validated(self) -> None:
         section_match = re.search(
-            r"^##\s*(?:Not validated|\u5c1a\u672a\u9a57\u6536)\s*$"
+            r"^##\s*(?:Not validated|Unaccepted Items|\u5c1a\u672a\u9a57\u6536)\s*$"
             r"(?P<body>.*?)(?=^##\s|\Z)",
             self.text,
             flags=re.IGNORECASE | re.MULTILINE | re.DOTALL,
@@ -86,7 +86,7 @@ class TestEvidenceTests(unittest.TestCase):
             "TEST_EVIDENCE.md must contain a not-validated section",
         )
         section = section_match.group("body")
-        for platform in ("AWS", "4G", "5G", "Windows"):
+        for platform in ("API Gateway", "4G", "5G"):
             with self.subTest(platform=platform):
                 self.assertRegex(
                     section,
